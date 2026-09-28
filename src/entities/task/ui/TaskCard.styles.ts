@@ -1,0 +1,57 @@
+import { makeStyles } from '@shared/ui';
+
+export const useTaskCardStyles = makeStyles(({ colors, radii, spacing }) => ({
+  card: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  cardOverdue: { borderColor: colors.warning },
+  cardPressed: { opacity: 0.7 },
+  accent: { width: 4 },
+  body: { flex: 1, padding: spacing.md, gap: spacing.xs },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  titleBlock: { flex: 1, gap: spacing.xxs },
+  titleDone: { textDecorationLine: 'line-through', opacity: 0.6 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
+  chip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surfaceMuted,
+  },
+  chipWarning: { backgroundColor: colors.warningMuted },
+  chipDanger: { backgroundColor: colors.dangerMuted },
+  // The day's share is the one thing on the card the student acts on now, so
+  // it sits on its own line rather than among the grey chips.
+  subtasks: { gap: spacing.xxs, marginTop: spacing.xs, paddingLeft: spacing.xs },
+  subtaskRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  subtaskDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subtaskDotDone: { backgroundColor: colors.primary, borderColor: colors.primary },
+  subtaskDone: { textDecorationLine: 'line-through', opacity: 0.6 },
+  chipQuota: { backgroundColor: colors.primaryMuted, alignSelf: 'flex-start', marginTop: spacing.xs },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
+  progressTrack: { flex: 1 },
+  check: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkDone: { backgroundColor: colors.success, borderColor: colors.success },
+  checkPressed: { opacity: 0.6 },
+}));

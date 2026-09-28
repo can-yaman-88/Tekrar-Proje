@@ -1,0 +1,20 @@
+# Minimal project config; `supabase init` defaults apply to everything omitted.
+project_id = "tekrar"
+
+[api]
+schemas = ["public"]
+
+[db]
+major_version = 15
+
+[functions.daily-checkin]
+verify_jwt = true
+
+[functions.ingest-syllabus]
+verify_jwt = true
+
+[functions.generate-weekly-plan]
+verify_jwt = true
+
+[functions.llm-models]
+verify_jwt = true
