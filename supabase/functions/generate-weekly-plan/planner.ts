@@ -10,12 +10,13 @@
 // neither steers the schedule.
 import type { ExamKind, IsoDate, StudyStep, TaskType } from '../_shared/contracts/enums.contract.ts';
 import { addDays, diffInDays } from '../_shared/domain/dates.ts';
+import { bySyllabusOrder } from '../_shared/domain/syllabus-order.ts';
 import { planDeadlineWork } from '../_shared/domain/workload.ts';
 import {
   effortOf,
   FIRST_CYCLE,
-  NEXT_DAY_STEPS,
   REVIEW_CYCLE,
+  SAME_DAY_OR_LATER_STEPS,
   SAME_DAY_PAIR,
   stepCopy,
   taskTypeOf,
@@ -27,6 +28,8 @@ export interface PlanTopic {
   courseId: string;
   courseLabel: string;
   weekNumber: number | null;
+  /** Place within its week, as the syllabus lists it. */
+  position: number;
   easeFactor: number;
   repetitions: number;
   nextReviewOn: IsoDate | null;
@@ -70,6 +73,12 @@ export interface PlanSlot {
   dueDate: IsoDate;
   /** Why it was scheduled — drives the prompt and the fallback wording. */
   reason: 'cycle' | 'review' | 'exam' | 'weak' | 'new';
+  /**
+   * The concept page and the Feynman page of one topic share this key and
+   * become a single learning task with two steps. null for work that stands
+   * on its own — the quiz, the advanced problems, a lone Feynman page.
+   */
+  learningGroupKey: string | null;
   title: string;
   instructions: string;
 }
@@ -84,6 +93,12 @@ export interface PlanCommitment {
 
 export interface PlanInput {
   weekStart: IsoDate;
+  /**
+   * The day planning starts from. A plan made mid-week only fills the days
+   * still ahead; untouched work on the days behind is replaced and its topics
+   * are planned again from here. Defaults to weekStart.
+   */
+  today?: IsoDate;
   topics: readonly PlanTopic[];
   exams: readonly PlanExam[];
   /** Work with its own deadline; it takes its share of the week first. */
@@ -107,7 +122,14 @@ const DAYS = 7;
 import { DEFAULT_DAILY_CAPACITY } from '../_shared/domain/capacity.ts';
 /** A class hour costs this share of the day's study budget. */
 const CLASS_MINUTE_COST = 0.5;
-const MIN_DAILY_CAPACITY = 30;
+/**
+ * However full the timetable, a day keeps room for one concept + Feynman
+ * sitting (55 minutes). At 30, every weekday of a four-class week fell to the
+ * floor, no sitting ever fit on one, and new topics got a lone concept page
+ * with the rest of their loop dropped. Never more than the day's own budget,
+ * though: a day the student closed, or rarely studies, stays what it is.
+ */
+const CLASS_DAY_FLOOR = 60;
 const MAX_TOPICS_PER_WEEK = 10;
 /** Concept page, quiz, Feynman page, and the optional harder set. */
 const MAX_STEPS_PER_TOPIC = 4;
@@ -142,8 +164,9 @@ const finishedFirstCycle = (topic: PlanTopic): boolean =>
   topic.completedSteps.includes('feynman') && topic.completedSteps.includes('quiz');
 
 /**
- * What this topic needs next, in order. Never skips ahead: the quiz waits for
- * the concept page, the Feynman page waits for the quiz. The harder set is a
+ * What this topic needs next, in order. Never skips ahead: the Feynman page
+ * waits for the concept page — the two are one sitting — and the quiz waits
+ * for the Feynman page, which is what makes it recall. The harder set is a
  * fourth task in the same batch, and only when the student said they have one.
  */
 function stepsFor(topic: PlanTopic, reviewDue: boolean): { steps: StudyStep[]; isReview: boolean } {
@@ -208,6 +231,7 @@ function planTopic(
 
 export function planWeek({
   weekStart,
+  today = weekStart,
   topics,
   exams,
   commitments,
@@ -226,7 +250,15 @@ export function planWeek({
   const planned = topics
     .map((topic) => planTopic(topic, plannedExams, weekStart, weekEnd))
     .filter((plan): plan is TopicPlan => plan !== null)
-    .sort((a, b) => b.score - a.score || a.topic.title.localeCompare(b.topic.title))
+    // Equal urgency goes in syllabus order: week 2 before week 6, whatever the
+    // topics are called. Ties across courses keep a fixed, name-blind order.
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        bySyllabusOrder(a.topic, b.topic) ||
+        a.topic.courseId.localeCompare(b.topic.courseId) ||
+        a.topic.id.localeCompare(b.topic.id),
+    )
     .slice(0, MAX_TOPICS_PER_WEEK);
 
   if (planned.length === 0) {
@@ -234,11 +266,17 @@ export function planWeek({
     return { weekStart, weekEnd, slots: [], notes };
   }
 
-  // Exam days are for sitting the exam, not for new work.
+  // Exam days are for sitting the exam, not for new work — and days already
+  // behind are for nothing at all: work planned onto yesterday is overdue the
+  // moment it is written.
   const examDays = new Set(plannedExams.map((exam) => exam.examDate));
-  const days = Array.from({ length: DAYS }, (_, i) => addDays(weekStart, i)).filter((day) => !examDays.has(day));
+  const days = Array.from({ length: DAYS }, (_, i) => addDays(weekStart, i)).filter(
+    (day) => day >= today && !examDays.has(day),
+  );
   if (days.length === 0) {
-    notes.push('Bu hafta tamamı sınav günü; plan oluşturulmadı.');
+    notes.push(
+      today > weekEnd ? 'Bu haftanın planlanacak günü kalmadı.' : 'Bu hafta kalan günlerin tamamı sınav günü; plan oluşturulmadı.',
+    );
     return { weekStart, weekEnd, slots: [], notes };
   }
 
@@ -248,7 +286,8 @@ export function planWeek({
       const weekday = isoWeekday(day);
       const budget = capacityByWeekday?.[weekday] ?? fallbackCapacity;
       const classMinutes = classLoad?.[weekday] ?? 0;
-      return [day, Math.max(MIN_DAILY_CAPACITY, Math.round(budget - classMinutes * CLASS_MINUTE_COST))];
+      const floor = Math.min(budget, CLASS_DAY_FLOOR);
+      return [day, Math.max(floor, Math.round(budget - classMinutes * CLASS_MINUTE_COST))];
     }),
   );
 
@@ -258,7 +297,7 @@ export function planWeek({
   let reservedForHomework = 0;
   if (commitments && commitments.length > 0) {
     const reserved = planDeadlineWork({
-      today: weekStart,
+      today: days[0] ?? today,
       days: days.map((date) => ({
         date,
         capacityMinutes: remaining.get(date) ?? 0,
@@ -293,8 +332,8 @@ export function planWeek({
     const ordered = preferred.length > 0 ? preferred : days;
 
     // The concept page and the Feynman page are one sitting, so they are placed
-    // as one batch; the quiz is deliberately not part of it — it waits for a
-    // later day, which is what makes it a recall test rather than a re-read.
+    // as one batch. The quiz is its own task: the same day or a later one,
+    // never before the page.
     const batches: StudyStep[][] = [];
     const sameDay = plan.steps.filter((step) => SAME_DAY_PAIR.includes(step));
     if (sameDay.length > 0) batches.push(sameDay);
@@ -305,7 +344,11 @@ export function planWeek({
     let lastIndex = -1; // steps never run backwards in time
     let cursor = 0; // round-robin across the course's own days
 
-    const place = (steps: readonly StudyStep[], minIndex: number): number | null => {
+    // One key per topic per cycle: the pair keeps it even when the two halves
+    // end up on different days, because they are still one piece of work.
+    const pairKey = `${plan.topic.id}:${plan.isReview ? 'review' : 'first'}`;
+
+    const place = (steps: readonly StudyStep[], minIndex: number, groupKey: string | null): number | null => {
       const minutes = steps.reduce((total, step) => total + effortOf(step, plan.isReview).minutes, 0);
 
       let day: IsoDate | null = null;
@@ -340,6 +383,7 @@ export function planWeek({
           estimatedMinutes: effort.minutes,
           dueDate: day,
           reason: plan.reason,
+          learningGroupKey: groupKey,
           ...stepCopy(step, plan.topic.title, { isReview: plan.isReview, useTeacherMaterial }),
         });
       }
@@ -347,10 +391,17 @@ export function planWeek({
     };
 
     for (const batch of batches) {
-      const needsLaterDay = batch.some((step) => NEXT_DAY_STEPS.includes(step));
-      const minIndex = Math.max(0, lastIndex + (needsLaterDay ? 1 : 0));
+      // Steps never run backwards in time; the quiz may share the page's day,
+      // and tries that day first — the earliest day that keeps the order.
+      const minIndex = Math.max(0, lastIndex);
+      if (lastIndex >= 0 && batch.some((step) => SAME_DAY_OR_LATER_STEPS.includes(step))) {
+        const position = ordered.indexOf(days[lastIndex] as IsoDate);
+        if (position >= 0) cursor = position;
+      }
 
-      const placed = place(batch, minIndex);
+      // Only a real pair is a group; a batch of one is just a task.
+      const groupKey = batch.length > 1 && batch.every((step) => SAME_DAY_PAIR.includes(step)) ? pairKey : null;
+      const placed = place(batch, minIndex, groupKey);
       if (placed !== null) {
         lastIndex = placed;
         continue;
@@ -362,7 +413,7 @@ export function planWeek({
         let index = minIndex;
         let anyPlaced = false;
         for (const step of batch) {
-          const single = place([step], index);
+          const single = place([step], index, groupKey);
           if (single === null) break;
           index = single;
           lastIndex = single;

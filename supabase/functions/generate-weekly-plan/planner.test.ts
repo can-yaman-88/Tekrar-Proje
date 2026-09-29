@@ -11,6 +11,7 @@ const topic = (id: string, over: Partial<PlanTopic> = {}): PlanTopic => ({
   courseId: 'c1',
   courseLabel: 'ME 201',
   weekNumber: 1,
+  position: 0,
   easeFactor: 2.5,
   repetitions: 2,
   nextReviewOn: null,
@@ -40,10 +41,10 @@ Deno.test('görevler dersin işlendiği günlere dağıtılır', () => {
     exams: [],
     courseClassDays: { c1: [3, 5] }, // çarşamba, cuma
   });
-  // Konsept ve Feynman aynı oturum: ikisi de çarşamba. Sınav araya girmez,
-  // cumaya kalır — aradan geçen zaman onu hatırlama testi yapar.
+  // Konsept ve Feynman aynı oturum: ikisi de çarşamba. Yer olduğu için sınav da
+  // aynı gün — Feynman'dan önceye düşmedikçe aynı gün de olabilir.
   assertEquals(slots.map((s) => s.step), ['concept_note', 'feynman', 'quiz']);
-  assertEquals(slots.map((s) => s.dueDate), [WEDNESDAY, WEDNESDAY, FRIDAY]);
+  assertEquals(slots.map((s) => s.dueDate), [WEDNESDAY, WEDNESDAY, WEDNESDAY]);
   assertEquals(slots.every((s) => s.dueDate !== MONDAY), true);
 });
 
@@ -161,7 +162,9 @@ Deno.test('gün bazlı kapasite kullanılır: yoğun güne az, boş güne çok i
   const minutesOn = (date: string) =>
     slots.filter((s) => s.dueDate === date).reduce((sum, s) => sum + s.estimatedMinutes, 0);
   assertEquals(minutesOn(MONDAY) <= 30, true);
-  assertEquals(minutesOn('2026-09-26') <= 60, true); // cuma
+  assertEquals(minutesOn(FRIDAY) <= 60, true);
+  // Cumartesi (26 Eylül) boş gün: en çok iş oraya düşer.
+  assertEquals(minutesOn('2026-09-26') > 60, true);
 });
 
 Deno.test('ödev haftanın kapasitesinden önce pay alır', () => {
@@ -171,6 +174,7 @@ Deno.test('ödev haftanın kapasitesinden önce pay alır', () => {
     courseId,
     courseLabel: 'ME201',
     weekNumber: 1,
+    position: 0,
     easeFactor: 2.5,
     repetitions: 0,
     nextReviewOn: null,
@@ -215,6 +219,7 @@ Deno.test('kapasite dolduğunda ödev döngü adımlarını haftaya sığmaz hal
     courseId: 'c1',
     courseLabel: 'ME201',
     weekNumber: 1,
+    position: 0,
     easeFactor: 2.5,
     repetitions: 0,
     nextReviewOn: null,
@@ -246,12 +251,26 @@ Deno.test('kapasite dolduğunda ödev döngü adımlarını haftaya sığmaz hal
   );
 });
 
-Deno.test('konsept ve Feynman aynı güne, sınav kesinlikle sonraki güne düşer', () => {
+Deno.test('konsept ve Feynman aynı güne; yer varsa sınav da aynı güne düşer', () => {
   const { slots } = planWeek({
     weekStart: MONDAY,
     topics: [topic('a')],
     exams: [],
     dailyCapacityMinutes: 400,
+  });
+
+  const dayOf = (step: string) => slots.find((s) => s.step === step)?.dueDate;
+  assertEquals(dayOf('concept_note'), dayOf('feynman'));
+  assertEquals(dayOf('quiz'), dayOf('feynman'));
+});
+
+Deno.test('sınav Feynman gününe sığmazsa sonraki bir güne gider, asla önceye değil', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('a')],
+    exams: [],
+    // Konsept + Feynman 55 dakika: 60 dakikalık günde 25 dakikalık sınava yer kalmaz.
+    dailyCapacityMinutes: 60,
   });
 
   const dayOf = (step: string) => slots.find((s) => s.step === step)?.dueDate;
@@ -271,4 +290,119 @@ Deno.test('ikisi bir güne sığmazsa ayrılır ve bu bildirilir', () => {
   const dayOf = (step: string) => slots.find((s) => s.step === step)?.dueDate;
   assertEquals(dayOf('concept_note') === dayOf('feynman'), false);
   assertEquals(notes.some((n) => n.includes('aynı güne sığmadı')), true);
+});
+
+// ---------------------------------------------------------------------------
+// Öğrenme görevi: konsept + Feynman tek görev
+// ---------------------------------------------------------------------------
+Deno.test('konsept ve Feynman aynı öğrenme görevinin adımları olur', () => {
+  const { slots } = planWeek({ weekStart: MONDAY, topics: [topic('a')], exams: [] });
+
+  const keyOf = (step: string) => slots.find((s) => s.step === step)?.learningGroupKey ?? null;
+  assertEquals(keyOf('concept_note'), keyOf('feynman'));
+  assertEquals(keyOf('concept_note') === null, false);
+  // Sınav kendi başına bir görev: öğrenme görevine girmez.
+  assertEquals(keyOf('quiz'), null);
+});
+
+Deno.test('çift ayrı günlere düşse bile tek öğrenme görevi kalır', () => {
+  const { slots, notes } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('a')],
+    exams: [],
+    // İkisini bir arada tutamayacak kadar dar günler.
+    capacityByWeekday: { 1: 30, 2: 30, 3: 30, 4: 30, 5: 30, 6: 30, 7: 30 },
+  });
+
+  const concept = slots.find((s) => s.step === 'concept_note');
+  const feynman = slots.find((s) => s.step === 'feynman');
+  assertEquals(concept?.learningGroupKey === null, false);
+  assertEquals(concept?.learningGroupKey, feynman?.learningGroupKey);
+  assertEquals(concept?.dueDate === feynman?.dueDate, false);
+  assertEquals(notes.some((note) => note.includes('aynı güne sığmadı')), true);
+});
+
+Deno.test('tekrar turunda öğrenme görevi açılmaz', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('a', { completedSteps: ['concept_note', 'feynman', 'quiz'], nextReviewOn: MONDAY })],
+    exams: [],
+  });
+
+  assertEquals(slots.map((s) => s.step), ['feynman', 'quiz']);
+  assertEquals(slots.every((s) => s.learningGroupKey === null), true);
+});
+
+Deno.test('eşit puanda konu seçimi izlence sırasıyla yapılır, alfabeyle değil', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [
+      // Alfabetik sırada önde, izlencede geride.
+      topic('capacitance', { title: 'Capacitance and dielectrics', weekNumber: 6, repetitions: 0, lastReviewedAt: null }),
+      topic('charge', { title: 'Electric charge', weekNumber: 2, repetitions: 0, lastReviewedAt: null }),
+      topic('gauss', { title: 'Gauss law', weekNumber: 2, position: 1, repetitions: 0, lastReviewedAt: null }),
+    ],
+    exams: [],
+    // Tam döngünün sığdığı tek gün pazartesi: kim alır? Diğer günlerde tek adımlık yer var.
+    capacityByWeekday: { 1: 80, 2: 30, 3: 30, 4: 30, 5: 30, 6: 30, 7: 30 },
+  });
+
+  // İzlencede ilk olan (2. hafta, ilk konu) pazartesiyi alır; alfabede önde
+  // olan 6. hafta konusu en sona, artan yere kalır.
+  assertEquals([...new Set(slots.filter((s) => s.dueDate === MONDAY).map((s) => s.topicId))], ['charge']);
+  const firstDay = (id: string) => slots.filter((s) => s.topicId === id).map((s) => s.dueDate).sort()[0] ?? '';
+  assertEquals(firstDay('charge') < firstDay('gauss') && firstDay('gauss') < firstDay('capacitance'), true);
+});
+
+Deno.test('ders dolu gün bile bir konsept + Feynman oturumu kadar yer tutar', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('a', { repetitions: 0, lastReviewedAt: null })],
+    exams: [],
+    courseClassDays: { c1: [3] },
+    // Çarşamba 440 dakika ders: bütçenin yarısından fazlası gider.
+    classLoad: { 3: 440 },
+    capacityByWeekday: { 1: 150, 2: 150, 3: 150, 4: 150, 5: 150, 6: 150, 7: 150 },
+  });
+
+  const dayOf = (step: string) => slots.find((s) => s.step === step)?.dueDate;
+  // 30 dakikalık tabanla oturum çarşambaya sığmazdı; 60 ile ikisi birlikte orada.
+  assertEquals([dayOf('concept_note'), dayOf('feynman')], [WEDNESDAY, WEDNESDAY]);
+});
+
+Deno.test('taban, günün kendi bütçesini aşmaz: kapalı gün kapalı kalır', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('a', { repetitions: 0, lastReviewedAt: null })],
+    exams: [],
+    classLoad: { 1: 300 },
+    // Pazartesi öğrencinin kapattığı gün: bütçesi sıfır.
+    capacityByWeekday: { 1: 0, 2: 150, 3: 150, 4: 150, 5: 150, 6: 150, 7: 150 },
+  });
+
+  assertEquals(slots.some((s) => s.dueDate === MONDAY), false);
+});
+
+Deno.test('hafta ortasında yapılan plan geçmiş günlere iş koymaz', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    today: WEDNESDAY,
+    topics: [topic('a', { repetitions: 0, lastReviewedAt: null }), topic('b', { repetitions: 0, lastReviewedAt: null })],
+    exams: [],
+    dailyCapacityMinutes: 400,
+  });
+
+  assertEquals(slots.length > 0, true);
+  assertEquals(slots.every((s) => s.dueDate >= WEDNESDAY), true);
+});
+
+Deno.test('haftanın günü kalmadıysa plan boş döner ve nedenini söyler', () => {
+  const { slots, notes } = planWeek({
+    weekStart: MONDAY,
+    today: '2026-09-28',
+    topics: [topic('a', { repetitions: 0, lastReviewedAt: null })],
+    exams: [],
+  });
+
+  assertEquals([slots, notes], [[], ['Bu haftanın planlanacak günü kalmadı.']]);
 });

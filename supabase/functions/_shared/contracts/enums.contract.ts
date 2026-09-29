@@ -18,6 +18,9 @@ export const TaskTypeSchema = z.enum([
   'quiz', // 10 soruluk otomasyon sınavı ya da hocanın materyali
   'feynman', // boş kâğıda sıfırdan anlatma
   'advanced_problems', // yalnızca elinde zor soru olduğunu söylediğinde
+  // The container that holds one topic's concept page and Feynman page: one
+  // sitting, one card. Deliberately NOT a study step — see StudyStepSchema.
+  'learning',
   // Older / generic kinds, still produced by check-in reschedules.
   'problem_set',
   'concept_review',

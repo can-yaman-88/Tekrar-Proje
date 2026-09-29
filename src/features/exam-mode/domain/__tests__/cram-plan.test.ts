@@ -2,6 +2,8 @@ import { buildCramPlan, type CramTopic } from '../cram-plan';
 import { buildExamReviews } from '../exam-retro';
 
 const topic = (over: Partial<CramTopic> & { id: string; title: string }): CramTopic => ({
+  weekNumber: 1,
+  position: 0,
   easeFactor: 2.5,
   repetitions: 1,
   nextReviewOn: null,
@@ -11,6 +13,19 @@ const topic = (over: Partial<CramTopic> & { id: string; title: string }): CramTo
 });
 
 describe('buildCramPlan', () => {
+  it('eşit riskte izlence sırasına uyar, alfabeye değil', () => {
+    const plan = buildCramPlan({
+      today: '2026-09-25',
+      examDate: '2026-09-30',
+      topics: [
+        topic({ id: 'late', title: 'Akı', weekNumber: 6 }),
+        topic({ id: 'early', title: 'Yük', weekNumber: 2 }),
+      ],
+    });
+
+    expect(plan.readiness.map((row) => row.id)).toEqual(['early', 'late']);
+  });
+
   it('sıralamayı en zayıf konudan başlatır', () => {
     const plan = buildCramPlan({
       today: '2026-09-25',

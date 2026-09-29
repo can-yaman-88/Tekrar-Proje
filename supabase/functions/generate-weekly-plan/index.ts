@@ -41,12 +41,16 @@ Deno.serve(
     if (isCron && !body.userId) throw new HttpError('bad_request', 'userId is required for service-role calls.');
     const userId = isCron && body.userId ? body.userId : (await authenticate(req, env, service)).userId;
 
-    const weekStart = weekStartOf(body.weekStart ?? new Date().toISOString().slice(0, 10));
+    const serverToday = new Date().toISOString().slice(0, 10);
+    const weekStart = weekStartOf(body.weekStart ?? body.today ?? serverToday);
+    // The cron job runs on Monday morning and sends no date: its week starts today.
+    const today = body.today ?? serverToday;
     const repo = new WeeklyPlanRepository(service, userId);
     const context = await repo.loadContext(weekStart, addDays(weekStart, 6));
 
     const { weekEnd, slots, notes } = planWeek({
       weekStart,
+      today,
       topics: context.topics,
       exams: context.exams,
       commitments: context.commitments,

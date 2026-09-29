@@ -6,8 +6,9 @@
 //   4. advanced_problems  yalnızca öğrenci elinde zor soru olduğunu söylediyse
 //
 // Adım 1 ve 2 aynı gün, arka arkaya yapılır — öğrencinin fiilen çalıştığı biçim
-// bu. Sınav araya girmez, bir sonraki güne kalır: aradan zaman geçmesi onu
-// gerçek bir hatırlama testi yapar.
+// bu. Sınav Feynman sayfasından önce olmaz: aynı gün ya da sonraki bir gün.
+// (Eskiden her zaman ertesi güne itiliyordu; öğrenci sınavı çoğu zaman sayfanın
+// hemen ardından çözüyor, ve kural haftayı gereksiz yere dolduruyordu.)
 //
 // Tekrar (spaced repetition) aynı mantıkla ama kısa hâliyle yürür:
 // önce Feynman sayfası, sonra sıradaki sınav.
@@ -19,8 +20,8 @@ export const REVIEW_CYCLE: readonly StudyStep[] = ['feynman', 'quiz'];
 /** Steps the student does back to back, so they belong on the same day. */
 export const SAME_DAY_PAIR: readonly StudyStep[] = ['concept_note', 'feynman'];
 
-/** Steps that must wait for a later day than the pair above. */
-export const NEXT_DAY_STEPS: readonly StudyStep[] = ['quiz'];
+/** Steps that may share the pair's day but never come before it. */
+export const SAME_DAY_OR_LATER_STEPS: readonly StudyStep[] = ['quiz'];
 
 /** A step never gets scheduled before the ones before it are done. */
 export const stepOrder = (step: StudyStep): number => FIRST_CYCLE.indexOf(step);

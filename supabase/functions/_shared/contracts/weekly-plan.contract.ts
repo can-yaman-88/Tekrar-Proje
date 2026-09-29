@@ -7,6 +7,12 @@ import { IsoDateSchema, StudyStepSchema, TaskTypeSchema } from './enums.contract
 export const WeeklyPlanRequestSchema = z.object({
   /** Defaults to the caller's current week (Monday). */
   weekStart: IsoDateSchema.optional(),
+  /**
+   * The phone's own date. Planning starts here, so a plan made mid-week never
+   * lands on a day already behind; the server's UTC date is only a fallback,
+   * and near midnight in Turkey it is still yesterday.
+   */
+  today: IsoDateSchema.optional(),
   /** Only honoured for service-role callers (the cron job). */
   userId: z.uuid().optional(),
 });

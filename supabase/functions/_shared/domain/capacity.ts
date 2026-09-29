@@ -21,7 +21,12 @@ export interface LearnedCapacity {
   observedWeeks: number;
 }
 
-export const DEFAULT_DAILY_CAPACITY = 120;
+/**
+ * A day's study budget until the student's own history says otherwise. Class
+ * hours still come off it; at 120 a weekday with four classes fell to the
+ * 30-minute floor and no concept+Feynman sitting (55 minutes) ever fit.
+ */
+export const DEFAULT_DAILY_CAPACITY = 150;
 const MIN_CAPACITY = 30;
 const MAX_CAPACITY = 300;
 /** Below this many observed occurrences a weekday keeps the default. */
