@@ -1,3 +1,4 @@
+import { bySyllabusOrder } from '@domain/syllabus-order';
 import { isReviewDue, useReviewRadar } from '@entities/topic';
 import { mistakeLabel, useMistakeBook, useResolveMistake, type TopicMistakeWithContext } from '@entities/topic-mistake';
 import { addDays, formatShortDate, useToday } from '@shared/lib/date';
@@ -17,6 +18,8 @@ export interface MistakeGroup {
   key: string;
   courseLabel: string;
   topicTitle: string;
+  topicWeek: number | null;
+  topicPosition: number;
   topicId: string;
   rows: MistakeRow[];
 }
@@ -63,13 +66,22 @@ export function useNotebookScreen() {
         topicId: entry.topicId,
         courseLabel: entry.courseLabel,
         topicTitle: entry.topicTitle,
+        topicWeek: entry.topicWeek,
+        topicPosition: entry.topicPosition,
         rows: [],
       };
       group.rows.push({ id: entry.id, label: mistakeLabel(entry), isResolved: entry.resolvedAt !== null });
       byTopic.set(entry.topicId, group);
     }
+    // Within a course, the syllabus's order — the week a topic is taught in and
+    // its place in that week — never the topics' names.
     return [...byTopic.values()].sort(
-      (a, b) => a.courseLabel.localeCompare(b.courseLabel, 'tr') || a.topicTitle.localeCompare(b.topicTitle, 'tr'),
+      (a, b) =>
+        a.courseLabel.localeCompare(b.courseLabel, 'tr') ||
+        bySyllabusOrder(
+          { weekNumber: a.topicWeek, position: a.topicPosition },
+          { weekNumber: b.topicWeek, position: b.topicPosition },
+        ),
     );
   }, [visible]);
 

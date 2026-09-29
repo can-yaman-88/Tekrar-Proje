@@ -23,7 +23,7 @@ const toMistake = (row: {
 
 /** Enough of the topic and course to group by on the notebook screen. */
 const MISTAKE_WITH_TOPIC =
-  'id, topic_id, body, concept, task_id, created_at, resolved_at, topic:topics!topic_mistakes_topic_fk(title, course:courses!topics_course_fk(name, code))';
+  'id, topic_id, body, concept, task_id, created_at, resolved_at, topic:topics!topic_mistakes_topic_fk(title, week_number, position, course:courses!topics_course_fk(name, code))';
 
 export class TopicMistakeRepository extends BaseRepository {
   /** The whole book, newest first, grouped later by course and topic. */
@@ -41,6 +41,8 @@ export class TopicMistakeRepository extends BaseRepository {
     return rows.map((row) => ({
       ...toMistake(row),
       topicTitle: row.topic.title,
+      topicWeek: row.topic.week_number,
+      topicPosition: row.topic.position,
       courseLabel: row.topic.course.code ?? row.topic.course.name,
     }));
   }

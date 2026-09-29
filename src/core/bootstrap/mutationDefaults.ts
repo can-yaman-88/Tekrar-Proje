@@ -7,6 +7,10 @@ export interface UpdateTaskVariables {
   taskId: string;
   patch: TaskPatch;
 }
+export interface SetTaskPriorityVariables {
+  taskId: string;
+  isPriority: boolean;
+}
 export interface SetTaskStatusVariables {
   taskId: string;
   status: TaskStatus;
@@ -43,6 +47,9 @@ export function registerMutationDefaults(): void {
   });
   queryClient.setMutationDefaults(taskMutationKeys.setStatus, {
     mutationFn: ({ taskId, status }: SetTaskStatusVariables) => taskRepository.updateStatus(taskId, status),
+  });
+  queryClient.setMutationDefaults(taskMutationKeys.setPriority, {
+    mutationFn: ({ taskId, isPriority }: SetTaskPriorityVariables) => taskRepository.setPriority(taskId, isPriority),
   });
   queryClient.setMutationDefaults(taskMutationKeys.remove, {
     mutationFn: (taskId: string) => taskRepository.remove(taskId),

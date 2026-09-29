@@ -2,9 +2,9 @@ import type { IsoDate } from '@contracts/enums.contract';
 import { useLastCheckinDate } from '@entities/daily-log';
 import { nextExamDaysByCourse, toExamChipModel, useUpcomingExams } from '@entities/exam';
 import {
+  cardGroupsOf,
   isDeadlineWork,
   TASK_GROUPS,
-  taskGroupOf,
   useMissionTasks,
   useWeekTasks,
   type DailyShare,
@@ -81,26 +81,55 @@ export function useMissionScreen() {
   // Two rules decide what the board shows: homework with no share today is
   // work for another day, and a step is shown inside its parent rather than
   // beside it.
+  //
+  // A container is the exception to the first rule. Its steps carry the work,
+  // so the split never gives the container a share of its own — and testing it
+  // like any other homework hid the whole group: the parent failed the share
+  // test, the steps were folded into a parent that was no longer there, and a
+  // student with a group homework due Friday saw nothing at all.
   const boardTasks = useMemo(() => {
     const visibleIds = new Set(tasks.map((task) => task.id));
+    const stepsByParent = new Map<string, Task[]>();
+    for (const task of tasks) {
+      if (task.parentTaskId === null) continue;
+      stepsByParent.set(task.parentTaskId, [...(stepsByParent.get(task.parentTaskId) ?? []), task]);
+    }
+
+    const earnsItsPlace = (task: Task): boolean => {
+      const steps = stepsByParent.get(task.id);
+      if (steps !== undefined) {
+        return steps.some((step) => workload.shares.has(step.id) || step.dueDate <= today);
+      }
+      return !isDeadlineWork(task, today) || workload.shares.has(task.id);
+    };
+
     return tasks.filter(
-      (task) =>
-        (task.parentTaskId === null || !visibleIds.has(task.parentTaskId)) &&
-        (!isDeadlineWork(task, today) || workload.shares.has(task.id)),
+      (task) => (task.parentTaskId === null || !visibleIds.has(task.parentTaskId)) && earnsItsPlace(task),
     );
   }, [tasks, today, workload.shares]);
 
-  // The chips count what the list actually shows: a group task is one card,
-  // so its steps are not counted again beside it.
+  // A card answers to its own label and to each of its steps': a learning
+  // card is Concepts and Feynman both, so the "Feynman" chip must find it.
+  const groupsOfCard = useMemo(() => {
+    const stepsByParent = new Map<string, Task[]>();
+    for (const task of tasks) {
+      if (task.parentTaskId === null) continue;
+      stepsByParent.set(task.parentTaskId, [...(stepsByParent.get(task.parentTaskId) ?? []), task]);
+    }
+    return (card: Task) => cardGroupsOf(card, stepsByParent.get(card.id) ?? []);
+  }, [tasks]);
+
+  // The chips count what the list actually shows: one card, once per label it
+  // carries — its steps are not counted again beside it.
   const groupCounts = useMemo(() => {
     const counts: Record<TaskGroup, number> = { concepts: 0, quiz: 0, feynman: 0, homework: 0 };
-    for (const task of boardTasks) counts[taskGroupOf(task)]++;
+    for (const task of boardTasks) for (const group of groupsOfCard(task)) counts[group]++;
     return counts;
-  }, [boardTasks]);
+  }, [boardTasks, groupsOfCard]);
 
   const visibleTasks = useMemo(
-    () => (filter === 'all' ? boardTasks : boardTasks.filter((task) => taskGroupOf(task) === filter)),
-    [boardTasks, filter],
+    () => (filter === 'all' ? boardTasks : boardTasks.filter((task) => groupsOfCard(task).has(filter))),
+    [boardTasks, filter, groupsOfCard],
   );
 
   const summary = useMemo(

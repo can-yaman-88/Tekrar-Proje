@@ -13,7 +13,7 @@ const MAX_STEPS = 10;
  * are single sittings and stay that way. Anything else already carries steps
  * because the student asked for them in a check-in, and those keep working.
  */
-export function useSubtasks(task: Task) {
+export function useSubtasks(task: Task, { onUngrouped }: { onUngrouped?: () => void } = {}) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
 
@@ -57,6 +57,18 @@ export function useSubtasks(task: Task) {
     onError: (error) => showToast(describeError(error).message, 'danger'),
   });
 
+  // "Grubu dağıt": the steps become tasks of their own. The container is
+  // usually gone afterwards, so the screen showing it is told to leave.
+  const ungroup = useMutation({
+    mutationFn: () => taskRepository.ungroup(task.id),
+    onSuccess: async (result) => {
+      await invalidate();
+      showToast(`${result.freed} adım ayrı görev oldu.`, 'success');
+      if (result.container !== 'kept') onUngrouped?.();
+    },
+    onError: (error) => showToast(describeError(error).message, 'danger'),
+  });
+
   const remove = useMutation({
     networkMode: 'always' as const,
     mutationFn: (subtaskId: string) => taskRepository.remove(subtaskId),
@@ -94,6 +106,10 @@ export function useSubtasks(task: Task) {
     togglingId: toggle.isPending ? (toggle.variables?.id ?? null) : null,
     onRemove: (subtaskId: string) => remove.mutate(subtaskId),
     isRemoving: remove.isPending,
+    /** Only a task that has steps can be taken apart. */
+    canUngroup: rows.length > 0 && task.parentTaskId === null,
+    onUngroup: () => ungroup.mutate(),
+    isUngrouping: ungroup.isPending,
   };
 }
 

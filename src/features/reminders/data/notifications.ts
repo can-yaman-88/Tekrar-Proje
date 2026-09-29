@@ -6,6 +6,8 @@ const CHANNEL_ID = 'reminders';
 export const CHECKIN_ID_PREFIX = 'checkin';
 export const EXAM_ID_PREFIX = 'exam';
 export const SUMMARY_ID_PREFIX = 'summary';
+/** Reminders a report asked for ("yarın 9'da hatırlat"), one group per check-in. */
+export const NOTE_ID_PREFIX = 'memo';
 
 /** Buttons on the evening reminder, so the app can be skipped entirely. */
 export const CHECKIN_CATEGORY = 'checkin-reminder';
@@ -182,6 +184,49 @@ export async function scheduleExamReminders(reminders: readonly ExamReminder[]):
 }
 
 export const cancelExamReminders = () => cancelByPrefix(EXAM_ID_PREFIX);
+
+export interface ReportReminder {
+  /** Local calendar day, YYYY-MM-DD. */
+  date: string;
+  /** Local clock time, HH:MM. */
+  time: string;
+  text: string;
+}
+
+/**
+ * "Yarın 9'da fizik ödevini hatırlat", scheduled on this phone.
+ *
+ * Keyed by the check-in that asked, so undoing that check-in can take its
+ * reminders back. A time already past is skipped rather than fired at once.
+ */
+export async function scheduleReportReminders(
+  dailyLogId: string,
+  reminders: readonly ReportReminder[],
+): Promise<{ scheduled: number; past: number }> {
+  let scheduled = 0;
+  let past = 0;
+  for (const [index, reminder] of reminders.entries()) {
+    const fireAt = new Date(`${reminder.date}T${reminder.time}:00`);
+    if (Number.isNaN(fireAt.getTime()) || fireAt.getTime() <= Date.now()) {
+      past++;
+      continue;
+    }
+    await Notifications.scheduleNotificationAsync({
+      identifier: `${NOTE_ID_PREFIX}-${dailyLogId}-${index}`,
+      content: { title: 'Hatırlatma', body: reminder.text },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: fireAt,
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+    });
+    scheduled++;
+  }
+  return { scheduled, past };
+}
+
+/** The reminders one check-in scheduled, for when that check-in is undone. */
+export const cancelReportReminders = (dailyLogId: string) => cancelByPrefix(`${NOTE_ID_PREFIX}-${dailyLogId}-`);
 
 /** Wipes every scheduled reminder — used when the user signs out. */
 export const cancelAllReminders = () => Notifications.cancelAllScheduledNotificationsAsync();

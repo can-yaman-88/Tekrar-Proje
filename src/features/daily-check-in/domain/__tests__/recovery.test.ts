@@ -6,6 +6,10 @@ const succeeded: CheckinOutcome = {
   result: {
     dailyLogId: 'log',
     summary: 'özet',
+    changes: [],
+    answers: [],
+    reminders: [],
+    undoneLogId: null,
     coveredDates: ['2026-09-28'],
     attachmentNotes: [],
     updatedTaskIds: [],

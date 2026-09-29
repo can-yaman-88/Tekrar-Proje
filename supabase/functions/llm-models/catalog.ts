@@ -30,14 +30,16 @@ const CURATED: Record<'openai' | 'gemini', LlmModel[]> = {
   ],
 };
 
-const MAX_MODELS = 120;
-
 /**
+ * Every model that can return structured output — all of them, not a first
+ * page. The list used to stop at 120, and since it is sorted free-first and
+ * then by name, most paid models past the letter "G" could never be chosen.
+ * The phone pages and searches through it; the server does not cut it.
+ *
  * @param apiKeyOverride the student's own key, when they set one.
- * @param inUse the model the app is actually calling. The catalogue is cut to
- *        a readable length, and the cut was quietly dropping the model in use:
- *        searching for it returned "no match" while every call went through
- *        it. Whatever is in use is always in the list.
+ * @param inUse the model the app is actually calling. It is always in the list,
+ *        even when the catalogue no longer carries it, so the student can see
+ *        what every call goes through.
  */
 export async function listModels(
   env: Env,
@@ -73,11 +75,9 @@ export async function listModels(
     })
     .sort((a, b) => Number(b.isFree) - Number(a.isFree) || a.name.localeCompare(b.name));
 
-  const shown = models.slice(0, MAX_MODELS);
   const current = inUse?.trim();
-  if (current && !shown.some((model) => model.id === current)) {
-    const known = models.find((model) => model.id === current);
-    shown.unshift(known ?? { id: current, name: current, promptPricePerMillion: null, isFree: false });
+  if (current && !models.some((model) => model.id === current)) {
+    models.unshift({ id: current, name: current, promptPricePerMillion: null, isFree: false });
   }
-  return shown;
+  return models;
 }

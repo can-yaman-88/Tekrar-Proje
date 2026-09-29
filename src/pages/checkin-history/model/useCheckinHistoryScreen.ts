@@ -7,6 +7,7 @@ import {
   type CheckinRecord,
 } from '@entities/daily-log';
 import { TASK_STATUS_LABEL, type TaskStatus } from '@entities/task';
+import { cancelReportReminders } from '@features/reminders';
 import { formatLongDate } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
@@ -88,7 +89,11 @@ export function useCheckinHistoryScreen() {
     changesLoading: changes.isPending && expandedId !== null,
     onRevert: (id: string) =>
       revert.mutate(id, {
-        onSuccess: () => showToast('Değerlendirme geri alındı; plan eski haline döndü.', 'success'),
+        onSuccess: () => {
+          // Its "yarın 9'da hatırlat" goes with it.
+          void cancelReportReminders(id);
+          showToast('Değerlendirme geri alındı; plan eski haline döndü.', 'success');
+        },
         onError: (error) => showToast(describeError(error).message, 'danger'),
       }),
     isReverting: revert.isPending,
@@ -101,11 +106,13 @@ export function useCheckinHistoryScreen() {
       remove.mutate(
         { dailyLogId: id, revert: revertFirst },
         {
-          onSuccess: () =>
+          onSuccess: () => {
+            if (revertFirst) void cancelReportReminders(id);
             showToast(
               revertFirst ? 'Değerlendirme geri alındı ve silindi.' : 'Değerlendirme kaydı silindi.',
               'success',
-            ),
+            );
+          },
           onError: (error) => showToast(describeError(error).message, 'danger'),
         },
       ),

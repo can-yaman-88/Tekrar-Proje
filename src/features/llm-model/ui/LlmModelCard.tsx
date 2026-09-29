@@ -53,6 +53,12 @@ export function LlmModelCard({ settings }: { settings: LlmModelController }) {
             placeholder="gemini, gpt, claude…"
           />
 
+          {settings.search.trim() && settings.matchingModels > 0 ? (
+            <AppText variant="caption" tone="muted">
+              {settings.matchingModels} model eşleşti
+            </AppText>
+          ) : null}
+
           {settings.isLoading ? (
             <AppText variant="caption" tone="muted">
               Model listesi alınıyor…
@@ -93,6 +99,17 @@ export function LlmModelCard({ settings }: { settings: LlmModelController }) {
                   </Pressable>
                 );
               })}
+              {settings.hiddenModels > 0 ? (
+                <View style={styles.actions}>
+                  <Button
+                    label={`Daha fazla göster (${settings.hiddenModels} kaldı)`}
+                    variant="ghost"
+                    onPress={settings.onShowMore}
+                    style={styles.action}
+                  />
+                  <Button label="Tümünü göster" variant="ghost" onPress={settings.onShowAll} style={styles.action} />
+                </View>
+              ) : null}
             </View>
           )}
 

@@ -1,4 +1,5 @@
 import { CheckInForm, CheckInResult, useCheckinForm } from '@features/daily-check-in';
+import { useReportReminders } from '@features/reminders';
 import { AppText, makeStyles } from '@shared/ui';
 import { useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
@@ -6,6 +7,9 @@ import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 export function CheckInScreen() {
   const form = useCheckinForm();
   const router = useRouter();
+  // The server cannot ring the phone: what the report asked to be reminded of
+  // is scheduled here, once the answer is in.
+  useReportReminders(form.result);
   const styles = useStyles();
 
   return (

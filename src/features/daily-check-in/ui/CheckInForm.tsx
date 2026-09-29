@@ -1,17 +1,25 @@
+import { formatLongDate } from '@shared/lib/date';
 import { AppText, Button, makeStyles, useTheme } from '@shared/ui';
 import { Controller } from 'react-hook-form';
-import { TextInput, View } from 'react-native';
+import { Pressable, TextInput, View } from 'react-native';
+import { DAY_ROLLOVER_HOUR } from '../domain/report-date';
 import type { CheckinFormController } from '../model/useCheckinForm';
 import { AttachmentPicker } from './AttachmentPicker';
+import { CheckinExamples } from './CheckinExamples';
 
 const PLACEHOLDER =
   'örn. "30 kafes problemini bitirdim, iyiydi. Carnot setine başladım ama verim türetmesinde takıldım. Gauss\'a hiç bakamadım."';
 
-/** What the report can change besides reporting; elle yapılan her şey buraya da yazılabilir. */
-const POWERS_HINT =
-  'Aynı yazıyla planı da değiştirebilirsin: “pazarı boşalt, görevleri bugünden dağıt”, ' +
-  '“fizik ödevi 25 soruymuş”, “şu üçünü tek ödev olarak grupla”, “ödeve 40 dakika harcadım”, ' +
-  '“vize 5 aralığa ertelendi”, “geçen takıldığım bağıl hız meselesi oturdu”.';
+/**
+ * The sentences a tired student types most. One tap, and they can still add to
+ * it — "Bugün hiç çalışamadım." is a complete report on its own.
+ */
+const QUICK_PHRASES = [
+  'Bugünkü görevlerin hepsini bitirdim.',
+  'Bugün hiç çalışamadım.',
+  'Yarın sadece 1 saatim var.',
+  'Yarın ne var?',
+] as const;
 
 export function CheckInForm({ form }: { form: CheckinFormController }) {
   const styles = useStyles();
@@ -19,6 +27,12 @@ export function CheckInForm({ form }: { form: CheckinFormController }) {
 
   return (
     <View style={styles.container}>
+      {form.filedUnderYesterday ? (
+        <AppText variant="caption" tone="warning">
+          Saat {String(DAY_ROLLOVER_HOUR).padStart(2, '0')}.00’e kadar yazılan rapor biten güne sayılır:{' '}
+          {formatLongDate(form.reportDate)}.
+        </AppText>
+      ) : null}
       <Controller
         control={form.control}
         name="report"
@@ -49,15 +63,28 @@ export function CheckInForm({ form }: { form: CheckinFormController }) {
         </AppText>
       </View>
 
+      <View style={styles.phrases} accessibilityLabel="Hazır cümleler">
+        {QUICK_PHRASES.map((phrase) => (
+          <Pressable
+            key={phrase}
+            accessibilityRole="button"
+            accessibilityHint="Cümleyi raporun sonuna ekler"
+            disabled={form.isSubmitting}
+            onPress={() => form.appendPhrase(phrase)}
+            style={({ pressed }) => [styles.phrase, pressed && styles.pressed]}
+          >
+            <AppText variant="caption" tone="primary">
+              {phrase}
+            </AppText>
+          </Pressable>
+        ))}
+      </View>
+
       {/*
         The report can do everything the student can do by hand, and nothing on
         this screen said so — so they kept doing it by hand.
       */}
-      <View style={styles.powers}>
-        <AppText variant="caption" tone="muted">
-          {POWERS_HINT}
-        </AppText>
-      </View>
+      <CheckinExamples />
 
       <AttachmentPicker attachments={form.attachments} disabled={form.isSubmitting} />
 
@@ -94,11 +121,14 @@ const useStyles = makeStyles(({ colors, radii, spacing, typography }) => ({
     padding: spacing.md,
   },
   inputError: { borderColor: colors.danger },
-  powers: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.md,
-    padding: spacing.md,
+  phrases: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  phrase: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primaryMuted,
   },
+  pressed: { opacity: 0.7 },
   footer: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
   hint: { flex: 1 },
   errorBox: { backgroundColor: colors.dangerMuted, borderRadius: radii.md, padding: spacing.md, gap: spacing.xxs },

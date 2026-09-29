@@ -61,6 +61,14 @@ export function SubtaskSection({ subtasks }: { subtasks: SubtaskController }) {
         maxLength={200}
       />
       <Button label="Adım ekle" loading={subtasks.isAdding} disabled={!subtasks.canSubmit} onPress={subtasks.onAdd} />
+      {subtasks.canUngroup ? (
+        <Button
+          label="Grubu dağıt"
+          variant="secondary"
+          loading={subtasks.isUngrouping}
+          onPress={subtasks.onUngroup}
+        />
+      ) : null}
     </Card>
   );
 }

@@ -6,13 +6,13 @@ import { taskNoteKeys } from '@entities/task-note';
 import { taskSessionKeys } from '@entities/task-session';
 import { topicKeys } from '@entities/topic';
 import { topicMistakeKeys } from '@entities/topic-mistake';
-import { todayLocal } from '@shared/lib/date';
 import { isAppError } from '@shared/lib/errors';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
 import { processCheckin } from '../data/checkin.api';
 import { decideRecovery } from '../domain/recovery';
+import { reportDateFor } from '../domain/report-date';
 import { useCheckinDraftStore } from './checkin-draft.store';
 import type { PickedAttachment } from './useCheckinAttachments';
 
@@ -38,7 +38,8 @@ export function useSubmitCheckin() {
     networkMode: 'always',
     mutationFn: async ({ report, attachments }) => {
       const store = useCheckinDraftStore.getState();
-      const today = todayLocal();
+      // After midnight the report is still about the evening before.
+      const today = reportDateFor();
       const reusable = store.pending && store.pending.date === today && store.pending.text === report;
 
       let pending = reusable && store.pending ? store.pending : null;

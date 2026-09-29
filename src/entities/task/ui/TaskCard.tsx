@@ -59,6 +59,13 @@ export const TaskCard = memo(function TaskCard({
         </View>
 
         <View style={styles.metaRow}>
+          {model.isUrgent ? (
+            <View style={[styles.chip, styles.chipDanger]}>
+              <AppText variant="caption" tone="danger">
+                Acil
+              </AppText>
+            </View>
+          ) : null}
           <View style={[styles.chip, model.isOverdue && styles.chipWarning]}>
             <AppText variant="caption" tone={model.isOverdue ? 'warning' : 'muted'}>
               {model.dueLabel}

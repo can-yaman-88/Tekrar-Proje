@@ -16,6 +16,9 @@ export const isOpenMistake = (mistake: TopicMistake): boolean => mistake.resolve
 /** A book entry with the names needed to file it under a course and topic. */
 export interface TopicMistakeWithContext extends TopicMistake {
   topicTitle: string;
+  /** Where the topic sits in the syllabus, so lists follow the course's own order. */
+  topicWeek: number | null;
+  topicPosition: number;
   courseLabel: string;
 }
 

@@ -48,6 +48,11 @@ export interface OpenAiCompatibleOptions {
   headers?: Record<string, string>;
 }
 
+/** Below this, an answer would be cut off mid-list: better to say the balance is empty. */
+const MIN_RETRY_TOKENS = 1_024;
+/** The balance moves between the refusal and the retry; stay a little under it. */
+const RETRY_MARGIN_TOKENS = 32;
+
 /** Chat Completions with strict JSON-schema structured outputs. */
 export class OpenAiCompatibleProvider implements LlmProvider {
   readonly name: LlmProviderName;
@@ -59,23 +64,39 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   async generateStructured<T>(request: StructuredRequest<T>): Promise<StructuredResult<T>> {
     assertPromptSize(request.user);
 
-    const raw = await postJsonWithRetry(
-      `${this.options.baseUrl}/chat/completions`,
-      { Authorization: `Bearer ${this.options.apiKey}`, ...this.options.headers },
-      {
-        model: this.options.model,
-        messages: [
-          { role: 'system', content: request.system },
-          { role: 'user', content: userContent(request.user, request.images) },
-        ],
-        max_tokens: this.options.maxOutputTokens,
-        response_format: {
-          type: 'json_schema',
-          json_schema: { name: request.schemaName, strict: true, schema: toStrictJsonSchema(request.schema) },
+    const limit = Math.min(request.maxOutputTokens ?? this.options.maxOutputTokens, this.options.maxOutputTokens);
+    const send = (maxTokens: number) =>
+      postJsonWithRetry(
+        `${this.options.baseUrl}/chat/completions`,
+        { Authorization: `Bearer ${this.options.apiKey}`, ...this.options.headers },
+        {
+          model: this.options.model,
+          messages: [
+            { role: 'system', content: request.system },
+            { role: 'user', content: userContent(request.user, request.images) },
+          ],
+          max_tokens: maxTokens,
+          response_format: {
+            type: 'json_schema',
+            json_schema: { name: request.schemaName, strict: true, schema: toStrictJsonSchema(request.schema) },
+          },
         },
-      },
-      { attempts: 3, timeoutMs: this.options.timeoutMs },
-    );
+        { attempts: 3, timeoutMs: this.options.timeoutMs },
+      );
+
+    let raw: unknown;
+    try {
+      raw = await send(limit);
+    } catch (error) {
+      // A 402 is priced at the worst case: the whole output limit. When the
+      // gateway says how much the balance still covers, and that is enough for
+      // a real answer, ask again within it — the answer itself rarely needs a
+      // tenth of the reservation.
+      const affordable = error instanceof LlmError ? error.affordableTokens : undefined;
+      if (affordable === undefined || affordable < MIN_RETRY_TOKENS || affordable >= limit) throw error;
+      console.warn(JSON.stringify({ event: 'llm_limit_lowered_for_balance', requested: limit, affordable }));
+      raw = await send(affordable - RETRY_MARGIN_TOKENS);
+    }
 
     const parsed = ChatCompletionSchema.safeParse(raw);
     if (!parsed.success)
@@ -89,6 +110,6 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     if (choice?.finish_reason === 'length') throw new LlmError('invalid_output', 'Model output was truncated.');
     if (!choice?.message.content) throw new LlmError('invalid_output', 'Model returned empty content.');
 
-    return { data: parseStructured(choice.message.content, request.schema), model: parsed.data.model ?? this.options.model };
+    return { data: parseStructured(choice.message.content, request.schema, request.salvage), model: parsed.data.model ?? this.options.model };
   }
 }

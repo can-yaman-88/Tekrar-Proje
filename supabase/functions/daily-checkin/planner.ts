@@ -1,7 +1,7 @@
 // Deterministic translation of an LLM extraction into database effects.
 // The LLM only classifies what happened; dates, SM-2 and task generation are
 // decided here so they are testable and cannot be hallucinated.
-import type { CheckinExtraction } from '../_shared/contracts/daily-checkin.contract.ts';
+import type { CheckinExtraction, CheckinReminder } from '../_shared/contracts/daily-checkin.contract.ts';
 import type {
   IsoDate,
   TaskSource as TaskSourceValue,
@@ -9,8 +9,11 @@ import type {
   TaskType,
 } from '../_shared/contracts/enums.contract.ts';
 import { DEFAULT_DAILY_CAPACITY } from '../_shared/domain/capacity.ts';
+import { buildCramPlan, CRAM_WINDOW_DAYS, type CramTopic } from '../_shared/domain/cram-plan.ts';
 import { addDays, diffInDays, isoWeekday } from '../_shared/domain/dates.ts';
 import { type ClearedTask, planDayClearance } from '../_shared/domain/day-clearance.ts';
+import { bySyllabusOrder } from '../_shared/domain/syllabus-order.ts';
+import { planWeekShape, type ShapeDay, type ShapeTask, studyStepOf } from '../_shared/domain/week-shape.ts';
 import type { DayBudget } from '../_shared/domain/workload.ts';
 import {
   qualityForAccuracy,
@@ -21,6 +24,7 @@ import {
   type SrsState,
   WEAK_ACCURACY,
 } from '../_shared/domain/spaced-repetition.ts';
+import { relativeDay, weekdayName } from './format.ts';
 
 export interface CandidateTask {
   id: string;
@@ -36,14 +40,24 @@ export interface CandidateTask {
   instructions: string | null;
   /** Where the task came from; homework carries a deadline that may not slip. */
   source: TaskSourceValue;
+  /** Set when the task is a step of another: steps travel with their card. */
+  parentTaskId: string | null;
+  /** The exam a sprint task was made for; null for everything else. */
+  originExamId: string | null;
+  /** Marked urgent: kept where it is when a day has to shed work. */
+  isPriority: boolean;
 }
 
 export interface CandidateTopic {
   id: string;
+  /** "Kimyayı bu hafta dondur" reaches a task through its topic's course. */
+  courseId: string;
   title: string;
   courseName: string;
   /** Which teaching week this topic belongs to; scopes "sadece ilk haftanın". */
   weekNumber: number | null;
+  /** Place within its week, as the syllabus lists it. */
+  position: number;
   srs: SrsState;
 }
 
@@ -58,6 +72,12 @@ export interface CandidateExam {
   courseId: string;
   title: string;
   examDate: IsoDate;
+}
+
+/** What "vize için plan çıkar" needs to build the same plan the exam screen would. */
+export interface CramContext {
+  examId: string;
+  topics: CramTopic[];
 }
 
 /** Open entries in the mistake book, so the student can close one by saying so. */
@@ -89,7 +109,11 @@ export type TopicReviewRow = {
   next_review_on: IsoDate;
 };
 
-export type TaskSource = 'ai_checkin_reschedule' | 'ai_attachment' | 'homework';
+/**
+ * `manual` is work the student set themselves in the report: a day to do it on,
+ * not a deadline. `exam_cram` is a sprint plan the report asked for.
+ */
+export type TaskSource = 'ai_checkin_reschedule' | 'ai_attachment' | 'homework' | 'manual' | 'exam_cram';
 
 /**
  * A task the report asks to get rid of. Whether it is deleted outright or
@@ -197,6 +221,75 @@ export type MistakeResolutionRow = {
   mistake_id: string;
 };
 
+/** Study outside the plan, written down as work that is finished the moment it exists. */
+export type ExtraWorkRow = {
+  id: string;
+  topic_id: string;
+  type: TaskType;
+  title: string;
+  target_count: number | null;
+  completed_count: number;
+  correct_count: number | null;
+  estimated_minutes: number;
+  on_date: IsoDate;
+  /** Minutes they said it took; a measured session, like one logged by hand. */
+  session_minutes: number | null;
+};
+
+/** How an exam went, on the exam itself; its topics' schedule travels as topic reviews. */
+export type ExamResultRow = {
+  exam_id: string;
+  outcome: number;
+  note: string | null;
+};
+
+export type PriorityRow = {
+  task_id: string;
+  is_priority: boolean;
+};
+
+/** The topics an exam covers, as the report states them. */
+export type ExamScopeRow = {
+  exam_id: string;
+  topic_ids: string[];
+  /** The whole list, or an addition to the one already there. */
+  replace: boolean;
+};
+
+/** A sprint task created by this check-in, and the exam it belongs to. */
+export type ExamLinkRow = {
+  task_id: string;
+  exam_id: string;
+};
+
+/** A question from the report, with the day it asks about already worked out. */
+export interface PlanQuestion {
+  kind: CheckinExtraction['infoRequests'][number]['kind'];
+  /** The day for an agenda question; null for every other kind. */
+  date: IsoDate | null;
+}
+
+/**
+ * Decisions about the shape of the coming days that are not rows of their own
+ * but that the student should hear about: which days lost their work, which
+ * got a time limit, which courses were set aside.
+ */
+export interface ScheduleFacts {
+  /** Days a "hiç çalışamadım" emptied. */
+  missedDates: IsoDate[];
+  /** Days given a time limit, with the minutes they got. */
+  dayBudgets: { date: IsoDate; minutes: number }[];
+  holds: { mode: 'pause' | 'only'; courseIds: string[]; from: IsoDate; until: IsoDate }[];
+  /** Tasks closed by one "hepsini bitirdim", so the change list can say it in one line. */
+  bulkCompletedTaskIds: string[];
+  /** Sprint plans built for an exam, told as one line each rather than task by task. */
+  examPlans: { examId: string; tasks: number; days: number }[];
+  swaps: { first: IsoDate; second: IsoDate }[];
+  syllabusOrders: { from: IsoDate; until: IsoDate; moved: number }[];
+  tidies: { from: IsoDate; until: IsoDate; paired: number }[];
+  backlog: { action: 'spread' | 'close'; tasks: number }[];
+}
+
 export interface CheckinPlan {
   summary: string;
   /** Distinct days the report talked about, oldest first. */
@@ -220,8 +313,23 @@ export interface CheckinPlan {
   taskMoves: TaskMoveRow[];
   /** Weekdays the student said they can never work on; empty when unchanged. */
   blockWeekdays: number[];
+  /** Closed weekdays the student said they can work on again. */
+  reopenWeekdays: number[];
   /** Days that were emptied, for the sentence the app shows afterwards. */
   clearedDates: IsoDate[];
+  extraWork: ExtraWorkRow[];
+  /** Containers whose steps become cards of their own. */
+  taskUngroups: string[];
+  examScopes: ExamScopeRow[];
+  examResults: ExamResultRow[];
+  priorities: PriorityRow[];
+  examLinks: ExamLinkRow[];
+  /** Notifications for the phone to schedule. */
+  reminders: CheckinReminder[];
+  schedule: ScheduleFacts;
+  questions: PlanQuestion[];
+  /** What could not be done as asked, in the student's language. */
+  notes: string[];
   unmatchedMentions: string[];
   /** Ids the model returned that were not in the candidate lists (hallucinations). */
   droppedReferences: number;
@@ -240,6 +348,10 @@ export interface PlanInput {
   capacityByWeekday?: Readonly<Record<number, number>>;
   /** Weekdays already closed on the profile: work is never moved onto them. */
   blockedWeekdays?: readonly number[];
+  /** Topics each exam covers, for a result the report gives; loaded only then. */
+  examTopicIds?: Readonly<Record<string, readonly string[]>>;
+  /** Readiness of an exam's topics, for a plan the report asks for; loaded only then. */
+  cramContexts?: readonly CramContext[];
 }
 
 /** Caps applied to model output: the wire schema no longer advertises limits. */
@@ -255,7 +367,8 @@ const STRUGGLE_DRILL_PROBLEMS = 5;
 const MAX_ATTACHMENT_TASKS = 10;
 const MAX_PLANNED_WORK = 10;
 const MAX_REMOVALS = 40;
-const MAX_EDITS = 20;
+/** "Tüm görevleri İngilizce yap" renames the whole week, not a handful. */
+const MAX_EDITS = 80;
 const MAX_GROUPS = 5;
 const MAX_GROUP_CHILDREN = 20;
 const MAX_NOTES = 10;
@@ -275,6 +388,65 @@ const MAX_DAYS_AHEAD = 120;
 const CLEAR_WINDOW_DAYS = 14;
 const MAX_CLEARANCES = 7;
 const MAX_MOVES = 40;
+const MAX_DAY_TARGETS = 7;
+/** More cards than this in one day is not a target, it is a misread. */
+const MAX_MAIN_TASKS_PER_DAY = 12;
+const MAX_BULK_OUTCOMES = 7;
+const MAX_DAY_LOADS = 7;
+const MAX_HOLDS = 5;
+const MAX_QUESTIONS = 6;
+/**
+ * "Yarın çok yoğunum, hafif olsun" names no number, and the model is not
+ * allowed to invent one. The app's answer: half of what that weekday usually
+ * holds — enough to keep the cycle moving, light enough to be believed.
+ */
+const LIGHT_DAY_SHARE = 0.5;
+const MIN_LIGHT_DAY_MINUTES = 15;
+/** A final can sit a term away; a date past this is a misread year. */
+const MAX_EXAM_DAYS_AHEAD = 366;
+/** Which card gives up a crowded day first: the one furthest along the cycle. */
+const KEEP_RANK: Partial<Record<TaskType, number>> = {
+  learning: 0,
+  concept_note: 0,
+  feynman: 1,
+  quiz: 3,
+  advanced_problems: 4,
+};
+/** Homework and everything outside the loop sits between the page and the quiz. */
+const DEFAULT_KEEP_RANK = 2;
+const MAX_EXTRA_WORK = 10;
+const MAX_UNGROUPS = 30;
+const MAX_SWAPS = 3;
+const MAX_STRETCH_OPS = 2;
+const MAX_SCOPES = 5;
+/** "Haftayı düzenle" with no end named: the week that starts there. */
+const DEFAULT_STRETCH_DAYS = 6;
+/** The same words the weekly plan and the week tidier give a learning card. */
+const LEARNING_INSTRUCTIONS =
+  'Konsept sayfası ve Feynman anlatımı aynı oturum: önce sayfaya ekle, sonra kapat ve boş kâğıda anlat.';
+const MAX_PRIORITIES = 10;
+const MAX_EXAM_PLANS = 2;
+/** A sprint is a week of evenings; more steps than this is not a sprint. */
+const MAX_CRAM_TASKS = 40;
+const MAX_REMINDERS = 5;
+/** A reminder further out than this is the calendar's job, not a check-in's. */
+const MAX_REMINDER_DAYS_AHEAD = 60;
+/** "Yarın hatırlat" with no hour: the morning, when the day can still be arranged around it. */
+const DEFAULT_REMINDER_TIME = '09:00';
+/** A topic the student names as the hard part of an exam fails, however the exam went. */
+const HARD_TOPIC_QUALITY: RecallQuality = 2;
+
+/**
+ * A score, as a verdict. The score is the one objective thing an exam leaves
+ * behind, so when the student gives one it outranks how they felt about it.
+ */
+function outcomeForScore(percent: number): 1 | 2 | 3 | 4 | 5 {
+  if (percent >= 85) return 5;
+  if (percent >= 70) return 4;
+  if (percent >= 55) return 3;
+  if (percent >= 40) return 2;
+  return 1;
+}
 /**
  * Work that can still be moved: only what is left to do. A finished or set-aside
  * task keeps the day it happened on, and a `rescheduled` one has already been
@@ -290,6 +462,19 @@ const clamp = (text: string | null, max: number): string | null =>
 /** Confidence is a 1–5 scale; anything else is coerced rather than rejected. */
 const clampConfidence = (value: number | null): number | null =>
   value === null ? null : Math.min(5, Math.max(1, Math.round(value)));
+
+/**
+ * A `YYYY-MM-DD` the model wrote, when it is a real day inside the range.
+ * "2026-02-30" is not a date, however well it matches the pattern, and a date
+ * outside the range is a misread — dropped, never clamped into a wrong day.
+ */
+const validDate = (text: string | null, min: IsoDate, max: IsoDate): IsoDate | null => {
+  const value = text?.trim() ?? '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  if (Number.isNaN(time) || new Date(time).toISOString().slice(0, 10) !== value) return null;
+  return value >= min && value <= max ? value : null;
+};
 
 /** Keeps `problems_solved` inside the column's smallint range. */
 const clampSolved = (value: number | null): number | null =>
@@ -327,6 +512,8 @@ export function planCheckinEffects({
   courses = [],
   exams = [],
   openMistakes = [],
+  examTopicIds = {},
+  cramContexts = [],
 }: PlanInput): CheckinPlan {
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const topicById = new Map(topics.map((t) => [t.id, t]));
@@ -391,6 +578,8 @@ export function planCheckinEffects({
     ]);
   };
   let droppedReferences = 0;
+  /** What could not be done as asked, in the student's language. */
+  const notes: string[] = [];
 
   const recordQuality = (topicId: string, quality: RecallQuality, day: IsoDate) => {
     const previous = worstQualityByTopic.get(topicId);
@@ -400,7 +589,72 @@ export function planCheckinEffects({
     if (currentDay === undefined || day > currentDay) reviewDateByTopic.set(topicId, day);
   };
 
-  for (const outcome of extraction.taskOutcomes.slice(0, MAX_TASK_OUTCOMES)) {
+  // --- Cards. A container and the steps listed under it are one piece of work:
+  // they finish together and they move together.
+  const leaderOf = (task: CandidateTask): string =>
+    task.parentTaskId !== null && taskById.has(task.parentTaskId) ? task.parentTaskId : task.id;
+  const cardMembers = new Map<string, CandidateTask[]>();
+  for (const task of tasks) cardMembers.set(leaderOf(task), [...(cardMembers.get(leaderOf(task)) ?? []), task]);
+  /** A container whose steps are listed: its status is theirs to decide, and its minutes are theirs. */
+  const hasListedSteps = new Set(tasks.filter((task) => leaderOf(task) !== task.id).map(leaderOf));
+  const courseOf = (task: CandidateTask): string | null => topicById.get(task.topicId)?.courseId ?? null;
+
+  // --- "Bugünkü her şeyi bitirdim", "bugün hiç çalışamadım".
+  //
+  // The model says which DAY and which courses; which tasks that means is read
+  // off the list here, where a missed task cannot be. A task the report names
+  // on its own keeps its own outcome; a statement narrowed to some courses
+  // beats the unnarrowed one ("fizikte hiçbir şey yapmadım, geri kalan her
+  // şeyi bitirdim").
+  /** The tasks named, and every step of any container among them. */
+  const withSteps = (ids: readonly string[]): Set<string> =>
+    new Set(
+      ids.flatMap((id) => {
+        const task = taskById.get(id);
+        if (!task) return [];
+        return leaderOf(task) === task.id ? (cardMembers.get(id) ?? [task]).map((member) => member.id) : [id];
+      }),
+    );
+  const named = withSteps(extraction.taskOutcomes.map((outcome) => outcome.taskId));
+  const bulkClaimed = new Set<string>();
+  const bulkCompleted: CheckinExtraction['taskOutcomes'] = [];
+  const missedTaskIds = new Set<string>();
+  const missedDates = new Set<IsoDate>();
+  const bulks = extraction.bulkOutcomes
+    .slice(0, MAX_BULK_OUTCOMES)
+    .sort((a, b) => Number(a.courseIds.length === 0) - Number(b.courseIds.length === 0));
+  for (const bulk of bulks) {
+    const day = dayOf(bulk.daysAgo);
+    const onlyCourses = new Set(bulk.courseIds);
+    const except = withSteps(bulk.exceptTaskIds);
+    for (const task of tasks) {
+      if (task.dueDate !== day || !MOVABLE_STATUSES.has(task.status) || bulkClaimed.has(task.id)) continue;
+      if (named.has(task.id) || except.has(task.id)) continue;
+      const course = courseOf(task);
+      if (onlyCourses.size > 0 && (course === null || !onlyCourses.has(course))) continue;
+      bulkClaimed.add(task.id);
+      if (bulk.outcome === 'not_attempted') {
+        missedTaskIds.add(task.id);
+        missedDates.add(day);
+      } else if (!hasListedSteps.has(task.id)) {
+        // A container is finished by its steps, never directly.
+        bulkCompleted.push({
+          taskId: task.id,
+          outcome: 'completed',
+          problemsSolved: null,
+          correctCount: null,
+          daysAgo: bulk.daysAgo,
+          correctsEarlierReport: false,
+          confidence: null,
+          weakConcept: null,
+          weakResolved: false,
+          weakDetail: null,
+        });
+      }
+    }
+  }
+
+  for (const outcome of [...extraction.taskOutcomes.slice(0, MAX_TASK_OUTCOMES), ...bulkCompleted]) {
     const task = taskById.get(outcome.taskId);
     if (!task) {
       droppedReferences++;
@@ -611,6 +865,50 @@ export function planCheckinEffects({
     });
   }
 
+  // --- Study outside the plan: "plan dışı 15 türev sorusu çözdüm, 12 doğru".
+  //
+  // It used to land in "bunları bir göreve bağlayamadım", and with it went the
+  // one thing it proves: that the topic was practised, and how well. It is now
+  // a finished task on the day it happened — counted by the capacity learner,
+  // shown in the week's summary — and its accuracy reaches the review schedule
+  // exactly as a planned task's would.
+  const extraWork: ExtraWorkRow[] = [];
+  for (const item of extraction.extraWork.slice(0, MAX_EXTRA_WORK)) {
+    const topic = topicById.get(item.topicId);
+    if (!topic) {
+      droppedReferences++;
+      continue;
+    }
+    const solved = clampSolved(item.problemsSolved);
+    const counted = solved !== null && solved > 0 ? solved : null;
+    // Never more right than were solved; unsaid is unknown, not "all of them".
+    const reportedCorrect = clampSolved(item.correctCount);
+    const correctCount = counted === null || reportedCorrect === null ? null : Math.min(counted, reportedCorrect);
+    const minutes =
+      item.minutes !== null && Number.isFinite(item.minutes) ? Math.min(600, Math.max(1, Math.round(item.minutes))) : null;
+    const day = dayOf(item.daysAgo);
+    coveredDates.add(day);
+
+    const accuracy = counted !== null && correctCount !== null ? correctCount / counted : null;
+    recordQuality(topic.id, accuracy === null ? qualityForCompletion(null) : qualityForAccuracy(accuracy), day);
+    if (accuracy !== null && accuracy < WEAK_ACCURACY) {
+      noteMistake(topic.id, `Ek çalışma: isabet ${correctCount}/${counted}`, null, null);
+    }
+
+    extraWork.push({
+      id: crypto.randomUUID(),
+      topic_id: topic.id,
+      type: counted === null ? 'concept_review' : 'problem_set',
+      title: clamp(`Ek çalışma: ${topic.title}${counted === null ? '' : ` — ${counted} soru`}`, 200) ?? 'Ek çalışma',
+      target_count: counted,
+      completed_count: counted ?? 0,
+      correct_count: correctCount,
+      estimated_minutes: minutes ?? (counted === null ? ASSUMED_TASK_MINUTES : Math.min(240, Math.max(10, counted * 6))),
+      on_date: day,
+      session_minutes: minutes,
+    });
+  }
+
   // --- Work found in attached files (homework sheets, photos of problem lists).
   for (const proposal of extraction.attachmentTasks.slice(0, MAX_ATTACHMENT_TASKS)) {
     const topic = topicById.get(proposal.topicId);
@@ -687,10 +985,15 @@ export function planCheckinEffects({
 
     const count =
       proposal.problemCount === null ? null : Math.min(500, Math.max(1, Math.round(proposal.problemCount)));
+    // A named calendar date beats a count of days: it is what they wrote.
     const due =
-      proposal.dueInDays === null || !Number.isFinite(proposal.dueInDays)
+      validDate(proposal.dueDate, logDate, addDays(logDate, MAX_DAYS_AHEAD)) ??
+      (proposal.dueInDays === null || !Number.isFinite(proposal.dueInDays)
         ? undefined
-        : addDays(logDate, Math.min(MAX_DAYS_AHEAD, Math.max(0, Math.round(proposal.dueInDays))));
+        : addDays(logDate, Math.min(MAX_DAYS_AHEAD, Math.max(0, Math.round(proposal.dueInDays)))));
+    // "Yarın 20 türev sorusu çözeceğim" is a day they chose, not a deadline
+    // someone gave them: it must not be filed as homework, nor guarded like one.
+    const source: TaskSource = proposal.isHomework === false ? 'manual' : 'homework';
 
     const parentId = crypto.randomUUID();
     const totalMinutes = count === null ? 45 : Math.min(240, Math.max(20, count * 6));
@@ -710,7 +1013,7 @@ export function planCheckinEffects({
       instructions: clamp(proposal.instructions, 2000),
       target_count: count,
       estimated_minutes: totalMinutes,
-      source: 'homework',
+      source,
       rescheduled_from_task_id: null,
       ...(due ? { fixed_due_date: due } : {}),
     });
@@ -726,7 +1029,7 @@ export function planCheckinEffects({
         instructions: null,
         target_count: null,
         estimated_minutes: Math.max(5, Math.round(totalMinutes / steps.length)),
-        source: 'homework',
+        source,
         rescheduled_from_task_id: null,
         ...(due ? { fixed_due_date: due } : {}),
       });
@@ -816,50 +1119,93 @@ export function planCheckinEffects({
     taskEdits.push({ task_id: task.id, fields });
   }
 
-  // --- "Şunları tek iş olarak grupla": only ever on request, one level deep.
-  const taskGroups: TaskGroupRow[] = [];
-  const groupedChildIds = new Set<string>();
-  for (const group of extraction.taskGroups.slice(0, MAX_GROUPS)) {
-    const children = [...new Set(group.childTaskIds)]
-      .map((id) => taskById.get(id))
-      .filter((task): task is CandidateTask => task !== undefined)
-      .filter((task) => !groupedChildIds.has(task.id))
-      .slice(0, MAX_GROUP_CHILDREN);
-    if (children.length === 0) continue;
-
-    const owner = group.parentTaskId === null ? undefined : taskById.get(group.parentTaskId);
-    if (owner) {
-      const steps = children.filter((child) => child.id !== owner.id);
-      if (steps.length === 0) continue;
-      for (const step of steps) groupedChildIds.add(step.id);
-      taskGroups.push({ parent_task_id: owner.id, child_task_ids: steps.map((s) => s.id) });
+  // --- "Grupları dağıt": the steps become cards of their own, and the empty
+  // container goes — SQL decides whether it is deleted or set aside, and does
+  // it after the steps are out, never before.
+  const taskUngroups: string[] = [];
+  for (const request of extraction.taskUngroups.slice(0, MAX_UNGROUPS)) {
+    const task = taskById.get(request.taskId);
+    if (!task) {
+      droppedReferences++;
       continue;
     }
+    const container = hasListedSteps.has(task.id) ? task : taskById.get(leaderOf(task));
+    if (!container || !hasListedSteps.has(container.id) || taskUngroups.includes(container.id)) continue;
+    taskUngroups.push(container.id);
+  }
+  const ungrouped = new Set(taskUngroups);
+  /** A step whose card is being taken apart in this same report is already free. */
+  const isLoose = (task: CandidateTask): boolean => task.parentTaskId === null || ungrouped.has(task.parentTaskId);
 
-    // No task among them is the whole, so the group gets a container of its
-    // own. Two is the smallest thing worth calling a group.
-    const title = clamp(group.newParentTitle, 200);
-    const first = children[0];
-    if (title === null || first === undefined || children.length < 2) continue;
-    const parentId = crypto.randomUUID();
-    // The container is due when its last step is: finishing it earlier would
-    // mean nothing, and finishing it later would hide the deadline.
-    const latest = [...children].map((child) => child.dueDate).sort().at(-1) ?? first.dueDate;
-    drafts.push({
-      id: parentId,
-      parent_task_id: null,
+  // --- "Şunları tek iş olarak grupla": only ever on request, one level deep.
+  //
+  // Two shapes, and the model is not trusted to tell them apart:
+  //   · a topic's concept page and Feynman page are ONE sitting — the learning
+  //     card the weekly plan makes. They get a learning container, and one day.
+  //   · anything else is a piece of work in parts; homework keeps its label.
+  // A study step is never the whole of anything. "Konsepti Feynman'ın üstüne
+  // koy" left a concept page that could no longer be ticked off by itself —
+  // a container's status is its steps', not its own.
+  const taskGroups: TaskGroupRow[] = [];
+  const groupedChildIds = new Set<string>();
+  /** Containers this report creates, and the steps whose final day they follow. */
+  const containerDrafts: (Omit<NewTaskRow, 'due_date' | 'parent_task_id'> & { steps: string[] })[] = [];
+  /** Learning pairs that must end up on one day. */
+  const pairsToJoin: string[][] = [];
+  const isDeadlineSource = (task: CandidateTask): boolean => task.source === 'homework' || task.source === 'ai_attachment';
+  const isLearningPair = (members: readonly CandidateTask[]): boolean =>
+    new Set(members.map((member) => member.topicId)).size === 1 &&
+    members.every((member) => member.type === 'concept_note' || member.type === 'feynman') &&
+    members.some((member) => member.type === 'concept_note') &&
+    members.some((member) => member.type === 'feynman');
+  const openContainer = (members: readonly CandidateTask[], title: string | null): string | null => {
+    const first = members[0];
+    if (!first) return null;
+    const learning = isLearningPair(members);
+    const topic = topicById.get(first.topicId);
+    const name = title ?? (learning && topic ? `${topic.title} — öğrenme görevi` : null);
+    if (name === null) return null;
+    const id = crypto.randomUUID();
+    containerDrafts.push({
+      id,
+      steps: members.map((member) => member.id),
       topic_id: first.topicId,
-      type: first.type,
-      title,
-      instructions: null,
+      type: learning ? 'learning' : first.type,
+      title: name,
+      instructions: learning ? LEARNING_INSTRUCTIONS : null,
       target_count: null,
       estimated_minutes: null,
-      source: 'homework',
+      // Only work that has a deadline behind it is filed as homework.
+      source: members.every(isDeadlineSource) ? 'homework' : 'manual',
       rescheduled_from_task_id: null,
-      fixed_due_date: latest,
     });
-    for (const child of children) groupedChildIds.add(child.id);
-    taskGroups.push({ parent_task_id: parentId, child_task_ids: children.map((c) => c.id) });
+    for (const member of members) groupedChildIds.add(member.id);
+    taskGroups.push({ parent_task_id: id, child_task_ids: members.map((member) => member.id) });
+    if (learning) pairsToJoin.push(members.map((member) => member.id));
+    return id;
+  };
+
+  for (const group of extraction.taskGroups.slice(0, MAX_GROUPS)) {
+    const owner = group.parentTaskId === null ? undefined : taskById.get(group.parentTaskId);
+    const ownerIsWhole = owner !== undefined && studyStepOf(owner.type) === null && owner.parentTaskId === null;
+    const members = [...new Set([...group.childTaskIds, ...(owner && !ownerIsWhole ? [owner.id] : [])])]
+      .map((id) => taskById.get(id))
+      .filter((task): task is CandidateTask => task !== undefined)
+      // A container cannot become a step, and a step stays in the card it is in.
+      .filter((task) => !hasListedSteps.has(task.id) && isLoose(task) && !groupedChildIds.has(task.id))
+      .filter((task) => !ownerIsWhole || task.id !== owner.id)
+      .slice(0, MAX_GROUP_CHILDREN);
+
+    if (ownerIsWhole) {
+      if (members.length === 0) continue;
+      for (const member of members) groupedChildIds.add(member.id);
+      taskGroups.push({ parent_task_id: owner.id, child_task_ids: members.map((member) => member.id) });
+      if (owner.type === 'learning') pairsToJoin.push([owner.id, ...members.map((member) => member.id)]);
+      continue;
+    }
+    // Two is the smallest thing worth calling a group.
+    if (members.length < 2) continue;
+    openContainer(members, clamp(group.newParentTitle, 200));
   }
 
   // --- A note against a task: something to remember, not something done.
@@ -896,10 +1242,13 @@ export function planCheckinEffects({
   const courseById = new Map(courses.map((course) => [course.id, course]));
   const touchedExamIds = new Set<string>();
   for (const change of extraction.examChanges.slice(0, MAX_EXAM_CHANGES)) {
+    // "Vize 5 Aralığa ertelendi" is a date, and counting sixty-odd days to it
+    // is the model's weakest arithmetic — so the date it copied wins.
     const examDate =
-      change.dateInDays === null || !Number.isFinite(change.dateInDays)
+      validDate(change.exactDate, addDays(logDate, -MAX_DAYS_AGO), addDays(logDate, MAX_EXAM_DAYS_AHEAD)) ??
+      (change.dateInDays === null || !Number.isFinite(change.dateInDays)
         ? null
-        : addDays(logDate, Math.min(MAX_DAYS_AHEAD, Math.max(-MAX_DAYS_AGO, Math.round(change.dateInDays))));
+        : addDays(logDate, Math.min(MAX_EXAM_DAYS_AHEAD, Math.max(-MAX_DAYS_AGO, Math.round(change.dateInDays)))));
 
     if (change.action === 'insert') {
       const course = change.courseId === null ? undefined : courseById.get(change.courseId);
@@ -953,9 +1302,196 @@ export function planCheckinEffects({
     mistakeResolutions.push({ mistake_id: resolution.mistakeId });
   }
 
+  // --- What an exam covers: "vize 1 ilk beş haftayı kapsıyor". Weeks become
+  // that course's topics here, from the list the student sees; a result or a
+  // plan in the same report already reads the new list.
+  const examScopes: ExamScopeRow[] = [];
+  const scopedTopicIds: Record<string, readonly string[]> = { ...examTopicIds };
+  for (const scope of extraction.examScopes.slice(0, MAX_SCOPES)) {
+    const exam = examById.get(scope.examId);
+    if (!exam) {
+      droppedReferences++;
+      continue;
+    }
+    if (examScopes.some((row) => row.exam_id === exam.id)) continue;
+    const from = scope.fromWeek !== null && Number.isFinite(scope.fromWeek) ? scope.fromWeek : null;
+    const until = scope.untilWeek !== null && Number.isFinite(scope.untilWeek) ? scope.untilWeek : null;
+    const byWeek =
+      from === null && until === null
+        ? []
+        : topics.filter(
+            (topic) =>
+              topic.courseId === exam.courseId &&
+              topic.weekNumber !== null &&
+              topic.weekNumber >= (from ?? 1) &&
+              topic.weekNumber <= (until ?? Number.MAX_SAFE_INTEGER),
+          );
+    const named = scope.topicIds.filter((id) => topicById.has(id));
+    const topicIds = [...new Set([...byWeek.map((topic) => topic.id), ...named])];
+    if (topicIds.length === 0) {
+      notes.push(`${exam.title} için söylenen haftalarda konu bulamadım; sınavın konuları değişmedi.`);
+      continue;
+    }
+    examScopes.push({ exam_id: exam.id, topic_ids: topicIds, replace: scope.replace });
+    scopedTopicIds[exam.id] = scope.replace
+      ? topicIds
+      : [...new Set([...(examTopicIds[exam.id] ?? []), ...topicIds])];
+  }
+
+  // --- How an exam went: "vizeden 65 aldım", "kötü geçti, Gauss'ta zorlandım".
+  //
+  // The same thing the exam screen's "Sınav nasıl geçti?" does, said instead
+  // of tapped: every topic the exam covered is reviewed at the exam's quality,
+  // a topic named as the hard part fails whatever the rest did, and what is
+  // left of the sprint is no longer work. All of it through the paths the undo
+  // already knows: topic reviews are snapshotted, removals are snapshotted.
+  const examResults: ExamResultRow[] = [];
+  for (const result of extraction.examResults.slice(0, MAX_EXAM_CHANGES)) {
+    const exam = examById.get(result.examId);
+    if (!exam) {
+      droppedReferences++;
+      continue;
+    }
+    if (examResults.some((row) => row.exam_id === exam.id)) continue;
+    if (exam.examDate > logDate) {
+      notes.push(`${exam.title} henüz yapılmadı; sonucunu sınavdan sonra yazabilirsin.`);
+      continue;
+    }
+
+    const max = result.maxScore !== null && Number.isFinite(result.maxScore) && result.maxScore > 0 ? result.maxScore : 100;
+    const percent =
+      result.score === null || !Number.isFinite(result.score)
+        ? null
+        : Math.min(100, Math.max(0, (result.score / max) * 100));
+    const outcome =
+      percent !== null
+        ? outcomeForScore(percent)
+        : result.outcome !== null && Number.isFinite(result.outcome)
+          ? (Math.min(5, Math.max(1, Math.round(result.outcome))) as 1 | 2 | 3 | 4 | 5)
+          : null;
+    if (outcome === null) continue;
+
+    const hard = new Set(result.hardTopicIds.filter((id) => topicById.has(id)));
+    for (const topicId of new Set([...(scopedTopicIds[exam.id] ?? []), ...hard])) {
+      if (!topicById.has(topicId)) continue;
+      recordQuality(topicId, hard.has(topicId) ? HARD_TOPIC_QUALITY : outcome, logDate);
+    }
+    for (const task of tasks) {
+      if (task.originExamId === exam.id && task.source === 'exam_cram' && MOVABLE_STATUSES.has(task.status)) {
+        requestRemoval(task.id, 'Sınav geçti');
+      }
+    }
+    examResults.push({
+      exam_id: exam.id,
+      outcome,
+      note: result.score === null || !Number.isFinite(result.score) ? null : `${result.score}/${max}`,
+    });
+  }
+
+  // --- "Vize için plan çıkar": the sprint the exam screen would have built,
+  // with the same rules — only in the last week, weakest topic first. Old
+  // sprint tasks nobody has started make way for the new ones.
+  const cramRows: NewTaskRow[] = [];
+  const examLinks: ExamLinkRow[] = [];
+  const examPlans: ScheduleFacts['examPlans'] = [];
+  for (const request of extraction.examPlans.slice(0, MAX_EXAM_PLANS)) {
+    const exam = examById.get(request.examId);
+    if (!exam) {
+      droppedReferences++;
+      continue;
+    }
+    if (examPlans.some((plan) => plan.examId === exam.id)) continue;
+    const daysLeft = diffInDays(logDate, exam.examDate);
+    if (daysLeft < 0) {
+      notes.push(`${exam.title} geçti; plan çıkarılmadı.`);
+      continue;
+    }
+    if (daysLeft > CRAM_WINDOW_DAYS) {
+      notes.push(
+        `${exam.title} için ${daysLeft} gün var; sınav planı son ${CRAM_WINDOW_DAYS} güne kurulur. O zamana kadar haftalık plan işini görür.`,
+      );
+      continue;
+    }
+    const context = cramContexts.find((candidate) => candidate.examId === exam.id);
+    if (!context) continue;
+
+    const cram = buildCramPlan({ today: logDate, examDate: exam.examDate, topics: context.topics, capacityByWeekday });
+    notes.push(...cram.notes);
+    for (const task of tasks) {
+      if (task.originExamId !== exam.id || task.source !== 'exam_cram') continue;
+      if (task.status === 'pending' && task.completedCount === 0) requestRemoval(task.id, 'Sınav planı yenilendi');
+    }
+    let added = 0;
+    for (const item of cram.days.flatMap((day) => day.items)) {
+      if (cramRows.length >= MAX_CRAM_TASKS || !topicById.has(item.topicId)) continue;
+      const id = crypto.randomUUID();
+      cramRows.push({
+        id,
+        parent_task_id: null,
+        topic_id: item.topicId,
+        type: item.type,
+        title: item.title,
+        instructions: item.instructions,
+        target_count: item.step === 'quiz' ? 10 : null,
+        estimated_minutes: item.estimatedMinutes,
+        due_date: item.dueDate,
+        source: 'exam_cram',
+        rescheduled_from_task_id: null,
+      });
+      examLinks.push({ task_id: id, exam_id: exam.id });
+      added++;
+    }
+    examPlans.push({ examId: exam.id, tasks: added, days: cram.days.length });
+  }
+
+  // --- "Fizik ödevi acil" — and "artık acil değil". Urgency belongs to the
+  // card the student sees, not to one of its steps.
+  const urgentByLeader = new Map<string, boolean>();
+  const priorities: PriorityRow[] = [];
+  for (const request of extraction.priorities.slice(0, MAX_PRIORITIES)) {
+    const task = taskById.get(request.taskId);
+    if (!task) {
+      droppedReferences++;
+      continue;
+    }
+    const leader = taskById.get(leaderOf(task)) ?? task;
+    if (urgentByLeader.has(leader.id)) continue;
+    urgentByLeader.set(leader.id, request.urgent);
+    if (leader.isPriority !== request.urgent) priorities.push({ task_id: leader.id, is_priority: request.urgent });
+  }
+  /** Urgent work keeps its day when a day has to shed some. */
+  const isUrgent = (task: CandidateTask): boolean =>
+    urgentByLeader.get(leaderOf(task)) ?? taskById.get(leaderOf(task))?.isPriority ?? task.isPriority;
+
+  // --- "Yarın 9'da hatırlat". The phone schedules it; the server only makes
+  // sure the day and the hour are real ones.
+  const reminders: CheckinReminder[] = [];
+  for (const request of extraction.reminders.slice(0, MAX_REMINDERS)) {
+    const text = clamp(request.text, 120);
+    if (text === null || !Number.isFinite(request.daysAhead)) continue;
+    const clock = /^([01]?\d|2[0-3])[:.]([0-5]\d)$/.exec(request.time?.trim() ?? '');
+    reminders.push({
+      date: addDays(logDate, Math.min(MAX_REMINDER_DAYS_AHEAD, Math.max(0, Math.round(request.daysAhead)))),
+      time: clock ? `${clock[1]!.padStart(2, '0')}:${clock[2]}` : DEFAULT_REMINDER_TIME,
+      text,
+    });
+  }
+
   // --- Tasks the student asks to drop outright.
   for (const removal of extraction.taskRemovals.slice(0, MAX_REMOVALS)) {
     requestRemoval(removal.taskId, clamp(removal.reason, 200));
+  }
+
+  // "Geciken işleri kapat": everything open and overdue, as whole cards. The
+  // SQL keeps its usual rule — untouched work is deleted with a snapshot,
+  // anything with progress, notes or time on it is only set aside.
+  const backlog: ScheduleFacts['backlog'] = [];
+  const isOverdue = (task: CandidateTask): boolean => MOVABLE_STATUSES.has(task.status) && task.dueDate < logDate;
+  const backlogActions = new Set(extraction.backlogActions.map((request) => request.action));
+  if (backlogActions.has('close')) {
+    const leaders = new Set(tasks.filter((task) => isOverdue(task) && !handledTaskIds.has(task.id)).map(leaderOf));
+    for (const leader of leaders) requestRemoval(leader, 'Geciken iş kapatıldı');
+    backlog.push({ action: 'close', tasks: leaders.size });
   }
 
   const taskRemovals: TaskRemovalRow[] = [...removalIds].map(([task_id, reason]) => ({ task_id, reason }));
@@ -970,6 +1506,14 @@ export function planCheckinEffects({
   // The model says WHICH day; which day each task lands on is worked out here,
   // against the student's own capacity — that is not a judgement a language
   // model gets to make.
+  const clampAhead = (days: number): number => Math.min(CLEAR_WINDOW_DAYS, Math.max(0, Math.round(days)));
+  /** "Cumadan pazartesiye kadar": every day of a stretch; a missing or backwards end means one day. */
+  const stretch = (fromDays: number, untilDays: number | null): IsoDate[] => {
+    const first = clampAhead(fromDays);
+    const last = untilDays === null || !Number.isFinite(untilDays) ? first : Math.max(first, clampAhead(untilDays));
+    return Array.from({ length: last - first + 1 }, (_, index) => addDays(logDate, first + index));
+  };
+
   const closedWeekdays = new Set<number>(blockedWeekdays);
   const newlyClosedWeekdays = new Set<number>();
   const clearedDates = new Set<IsoDate>();
@@ -978,25 +1522,58 @@ export function planCheckinEffects({
 
   for (const clearance of extraction.dayClearances.slice(0, MAX_CLEARANCES)) {
     if (!Number.isFinite(clearance.daysAhead)) continue;
-    const offset = Math.min(CLEAR_WINDOW_DAYS, Math.max(0, Math.round(clearance.daysAhead)));
-    const date = addDays(logDate, offset);
-    clearedDates.add(date);
+    for (const date of stretch(clearance.daysAhead, clearance.untilDaysAhead)) {
+      clearedDates.add(date);
 
-    // "Pazarları hiç çalışamam" is not a fact about this Sunday: it closes the
-    // weekday itself, here and on the profile, so next week's plan knows too.
-    if (clearance.everyWeek) {
-      const weekday = isoWeekday(date);
-      newlyClosedWeekdays.add(weekday);
-      closedWeekdays.add(weekday);
-      for (let ahead = 0; ahead <= CLEAR_WINDOW_DAYS; ahead++) {
-        const day = addDays(logDate, ahead);
-        if (isoWeekday(day) === weekday) clearedDates.add(day);
+      // "Pazarları hiç çalışamam" is not a fact about this Sunday: it closes the
+      // weekday itself, here and on the profile, so next week's plan knows too.
+      if (clearance.everyWeek) {
+        const weekday = isoWeekday(date);
+        newlyClosedWeekdays.add(weekday);
+        closedWeekdays.add(weekday);
+        for (let ahead = 0; ahead <= CLEAR_WINDOW_DAYS; ahead++) {
+          const day = addDays(logDate, ahead);
+          if (isoWeekday(day) === weekday) clearedDates.add(day);
+        }
       }
     }
 
     if (clearance.spreadFromDaysAhead !== null && Number.isFinite(clearance.spreadFromDaysAhead)) {
-      const from = Math.min(CLEAR_WINDOW_DAYS, Math.max(0, Math.round(clearance.spreadFromDaysAhead)));
+      const from = clampAhead(clearance.spreadFromDaysAhead);
       statedSpreadFrom = statedSpreadFrom === null ? from : Math.min(statedSpreadFrom, from);
+    }
+  }
+
+  // "Pazarları artık çalışabiliyorum" lifts the standing rule — for the spread
+  // below as much as for next week's plan. A report that closes and reopens the
+  // same weekday contradicts itself, and the stricter reading wins.
+  const reopenedWeekdays = new Set<number>();
+  for (const reopen of extraction.reopenedWeekdays.slice(0, 7)) {
+    if (!Number.isFinite(reopen.daysAhead)) continue;
+    const weekday = isoWeekday(addDays(logDate, clampAhead(reopen.daysAhead)));
+    if (newlyClosedWeekdays.has(weekday) || reopenedWeekdays.has(weekday)) continue;
+    if (!blockedWeekdays.includes(weekday)) {
+      notes.push(`${weekdayName(weekday)} zaten kapalı bir gün değildi.`);
+      continue;
+    }
+    reopenedWeekdays.add(weekday);
+    closedWeekdays.delete(weekday);
+  }
+
+  // "Yarın sadece 1 saatim var": that day's own limit, in place of what it
+  // usually holds. "Hafif olsun" names no number, and the model may not invent
+  // one — the share below is the app's, applied the same way every time.
+  const budgetByDate = new Map<IsoDate, number>();
+  for (const load of extraction.dayLoads.slice(0, MAX_DAY_LOADS)) {
+    if (!Number.isFinite(load.daysAhead)) continue;
+    for (const date of stretch(load.daysAhead, load.untilDaysAhead)) {
+      const usual = capacityByWeekday?.[isoWeekday(date)] ?? DEFAULT_DAILY_CAPACITY;
+      budgetByDate.set(
+        date,
+        load.minutes !== null && Number.isFinite(load.minutes)
+          ? Math.min(600, Math.max(0, Math.round(load.minutes)))
+          : Math.max(MIN_LIGHT_DAY_MINUTES, Math.round((usual * LIGHT_DAY_SHARE) / 5) * 5),
+      );
     }
   }
 
@@ -1012,8 +1589,30 @@ export function planCheckinEffects({
     const update = taskUpdates.find((row) => row.task_id === task.id);
     return update === undefined ? MOVABLE_STATUSES.has(task.status) : MOVABLE_STATUSES.has(update.new_status);
   };
+  const dayOfTask = (task: CandidateTask): IsoDate => moveByTaskId.get(task.id) ?? task.dueDate;
+  /** Homework has a real deadline behind it; a generated study step does not. */
+  const hasDeadline = (task: CandidateTask): boolean => task.source === 'homework' || task.source === 'ai_attachment';
+  const capacityOn = (date: IsoDate): number =>
+    budgetByDate.get(date) ?? capacityByWeekday?.[isoWeekday(date)] ?? DEFAULT_DAILY_CAPACITY;
+  /** Days nothing may be moved onto: emptied, closed for good, or given up as missed. */
+  const offLimits = (date: IsoDate): boolean =>
+    clearedDates.has(date) || missedDates.has(date) || closedWeekdays.has(isoWeekday(date));
+
+  const knownCourses = new Set([...courses.map((course) => course.id), ...topics.map((topic) => topic.courseId)]);
 
   // A single task the student named: their day wins, no arithmetic needed.
+  //
+  // It moves as the card it is. A container takes its steps along — "fizik
+  // ödevini cumaya al" leaving the parts on their old days would be half a
+  // move — and a step of a learning card takes the whole card, because the
+  // concept page and the Feynman page are one sitting. A part of homework may
+  // move on its own: "grafiği cumaya al" is exactly that.
+  const explicitMoves = new Set<string>();
+  const moveTo = (task: CandidateTask, date: IsoDate): void => {
+    explicitMoves.add(task.id);
+    if (date !== task.dueDate) moveByTaskId.set(task.id, date);
+    else moveByTaskId.delete(task.id);
+  };
   for (const move of extraction.taskReschedules.slice(0, MAX_MOVES)) {
     const task = taskById.get(move.taskId);
     if (!task) {
@@ -1022,48 +1621,457 @@ export function planCheckinEffects({
     }
     if (!canMove(task) || !Number.isFinite(move.dueInDays)) continue;
     const date = addDays(logDate, Math.min(MAX_DAYS_AHEAD, Math.max(0, Math.round(move.dueInDays))));
-    if (date !== task.dueDate) moveByTaskId.set(task.id, date);
+    const leader = taskById.get(leaderOf(task)) ?? task;
+    const wholeCard = hasListedSteps.has(task.id) || leader.type === 'learning';
+    const riders = wholeCard ? (cardMembers.get(leader.id) ?? [task]).filter(canMove) : [task];
+    for (const rider of riders) moveTo(rider, date);
   }
 
-  if (clearedDates.size > 0) {
-    const movable = tasks.filter((task) => clearedDates.has(task.dueDate) && canMove(task) && !moveByTaskId.has(task.id));
 
-    if (movable.length > 0) {
-      const moving = new Set(movable.map((task) => task.id));
-      // What each remaining day already owes, so the spread does not pile work
-      // onto a day that is full of its own.
-      const committed = new Map<IsoDate, number>();
-      for (const task of tasks) {
-        if (!MOVABLE_STATUSES.has(task.status) || moving.has(task.id) || removalIds.has(task.id)) continue;
+  /** The part of a card that can still go elsewhere: not done, not removed, not placed by the student. */
+  const movingPart = (leader: string): CandidateTask[] =>
+    (cardMembers.get(leader) ?? []).filter((member) => canMove(member) && !explicitMoves.has(member.id));
+  /** A card costs what its steps cost; a container with listed steps adds nothing of its own. */
+  const minutesOf = (members: readonly CandidateTask[]): number => {
+    const own = members
+      .filter((member) => !hasListedSteps.has(member.id))
+      .reduce((sum, member) => sum + (member.estimatedMinutes ?? ASSUMED_TASK_MINUTES), 0);
+    return own > 0 ? own : ASSUMED_TASK_MINUTES;
+  };
+  const lateTitles = new Set<string>();
 
-        const minutes = task.estimatedMinutes ?? ASSUMED_TASK_MINUTES;
-        committed.set(task.dueDate, (committed.get(task.dueDate) ?? 0) + minutes);
+  /**
+   * Puts whole cards onto the given days through the spread a cleared day has
+   * always used: deadlines first, the first day with room, and — when no day
+   * has any — the emptiest one, because the day they came off is not an option.
+   *
+   * Cards, not rows: a learning task's two steps placed one by one could land
+   * on different days, and the one sitting they stand for would be split.
+   */
+  const moveCards = (leaders: Iterable<string>, days: readonly IsoDate[]): void => {
+    const cards = [...new Set(leaders)]
+      .slice(0, MAX_MOVES)
+      .map((leader) => ({ leader, members: movingPart(leader) }))
+      .filter((card) => card.members.length > 0);
+    if (cards.length === 0) return;
+    if (days.length === 0) {
+      notes.push('Taşınacak boş gün kalmadı; bazı görevler yerinde kaldı.');
+      return;
+    }
+
+    const moving = new Set(cards.flatMap((card) => card.members.map((member) => member.id)));
+    // What each day already owes, so the spread does not pile work onto a day
+    // that is full of its own.
+    const committed = new Map<IsoDate, number>();
+    for (const task of tasks) {
+      if (!canMove(task) || moving.has(task.id) || hasListedSteps.has(task.id)) continue;
+      const day = dayOfTask(task);
+      committed.set(day, (committed.get(day) ?? 0) + (task.estimatedMinutes ?? ASSUMED_TASK_MINUTES));
+    }
+
+    const budgets: DayBudget[] = days.map((date) => ({
+      date,
+      capacityMinutes: capacityOn(date),
+      committedMinutes: committed.get(date) ?? 0,
+    }));
+    const cleared: ClearedTask[] = cards.map(({ leader, members }) => {
+      const deadlines = members.filter(hasDeadline).map((member) => member.dueDate).sort();
+      return {
+        id: leader,
+        // A deadline is where the work was due, wherever it sits today.
+        dueDate: deadlines[0] ?? dayOfTask(members[0]!),
+        estimatedMinutes: minutesOf(members),
+        hasDeadline: deadlines.length > 0,
+      };
+    });
+
+    const spread = planDayClearance({ days: budgets, tasks: cleared });
+    for (const placement of spread.placements) {
+      for (const member of movingPart(placement.taskId)) moveByTaskId.set(member.id, placement.date);
+    }
+    for (const leader of spread.lateTaskIds) {
+      const title = taskById.get(leader)?.title;
+      if (title) lateTitles.add(title);
+    }
+  };
+
+  // A learning pair grouped in this report is one sitting, so one day: the
+  // day the student gave, else the earlier of the two — pulling work forward
+  // beats pushing it back — but never a day already behind them when one of
+  // the pair is still ahead.
+  for (const pair of pairsToJoin) {
+    const members = pair.map((id) => taskById.get(id)).filter((task): task is CandidateTask => task !== undefined);
+    const movable = members.filter(canMove);
+    if (movable.length < 2) continue;
+    const stated = movable.filter((member) => explicitMoves.has(member.id)).map(dayOfTask).sort()[0];
+    const days = movable.map(dayOfTask).sort();
+    const earliest = days[0]!;
+    const day = stated ?? (earliest < logDate && days.some((d) => d >= logDate) ? logDate : earliest);
+    for (const member of movable) moveTo(member, day);
+  }
+
+  // "Salı ile perşembenin görevlerini değiştir": whole cards trade days. Work
+  // due on the earlier day cannot go to the later one past its deadline, so
+  // it stays and is named.
+  const swaps: ScheduleFacts['swaps'] = [];
+  for (const swap of extraction.daySwaps.slice(0, MAX_SWAPS)) {
+    if (!Number.isFinite(swap.firstDaysAhead) || !Number.isFinite(swap.secondDaysAhead)) continue;
+    const first = addDays(logDate, clampAhead(swap.firstDaysAhead));
+    const second = addDays(logDate, clampAhead(swap.secondDaysAhead));
+    if (first === second) continue;
+    const leadersOn = (date: IsoDate): string[] => [
+      ...new Set(
+        tasks
+          .filter((task) => canMove(task) && !explicitMoves.has(task.id) && dayOfTask(task) === date)
+          .map(leaderOf),
+      ),
+    ];
+    const plan = [
+      ...leadersOn(first).map((leader) => ({ leader, to: second })),
+      ...leadersOn(second).map((leader) => ({ leader, to: first })),
+    ];
+    for (const { leader, to } of plan) {
+      const members = movingPart(leader);
+      if (members.some((member) => isDeadlineSource(member) && member.dueDate < to)) {
+        notes.push(`"${taskById.get(leader)?.title}" teslimi ${relativeDay(to, logDate)} günden önce olduğu için yerinde kaldı.`);
+        continue;
       }
+      for (const member of members) moveTo(member, to);
+    }
+    swaps.push({ first, second });
+  }
 
-      const days: DayBudget[] = [];
-      for (let ahead = 0; ahead <= CLEAR_WINDOW_DAYS; ahead++) {
-        const date = addDays(logDate, (statedSpreadFrom ?? 0) + ahead);
-        if (clearedDates.has(date) || closedWeekdays.has(isoWeekday(date))) continue;
-        days.push({
-          date,
-          capacityMinutes: capacityByWeekday?.[isoWeekday(date)] ?? DEFAULT_DAILY_CAPACITY,
-          committedMinutes: committed.get(date) ?? 0,
-        });
+  // "Konu sırasına göre diz, günlerdeki görev sayısı aynı kalsın": the days
+  // keep their number of cards and only the cards trade places — the earliest
+  // topic week takes the earliest slot, and within a topic the loop's order
+  // holds. Deadlines and urgent work keep their days; the repair below then
+  // keeps every quiz from coming before its own Feynman page.
+  const syllabusOrders: ScheduleFacts['syllabusOrders'] = [];
+  const orderedDates = new Set<IsoDate>();
+  for (const order of extraction.syllabusOrders.slice(0, MAX_STRETCH_OPS)) {
+    if (!Number.isFinite(order.fromDaysAhead)) continue;
+    const window = stretch(order.fromDaysAhead, order.untilDaysAhead ?? order.fromDaysAhead + DEFAULT_STRETCH_DAYS);
+    const from = window[0]!;
+    const until = window.at(-1)!;
+    const onlyCourses = new Set(order.courseIds.filter((id) => knownCourses.has(id)));
+    const leaders = [
+      ...new Set(
+        tasks
+          .filter((task) => {
+            const day = dayOfTask(task);
+            if (!canMove(task) || explicitMoves.has(task.id) || isUrgent(task) || day < from || day > until) return false;
+            const course = courseOf(task);
+            return onlyCourses.size === 0 || (course !== null && onlyCourses.has(course));
+          })
+          .map(leaderOf),
+      ),
+    ].filter((leader) => {
+      const members = movingPart(leader);
+      return members.length > 0 && !members.some(isDeadlineSource);
+    });
+
+    const slots = leaders.map((leader) => dayOfTask(taskById.get(leader)!)).sort();
+    // Syllabus order, then the loop's own order within a topic — never the
+    // alphabet. Cards that rank the same share a run of slots, and within it a
+    // card keeps the day it already has whenever that day is in the run: the
+    // fewest moves that honour the order.
+    const topicOf = (leader: string) => topicById.get(taskById.get(leader)!.topicId);
+    const stepOf = (leader: string) =>
+      Math.min(...(cardMembers.get(leader) ?? [taskById.get(leader)!]).map((m) => KEEP_RANK[m.type] ?? DEFAULT_KEEP_RANK));
+    const compare = (a: string, b: string): number => {
+      const topicA = topicOf(a);
+      const topicB = topicOf(b);
+      const bySyllabus =
+        topicA && topicB ? bySyllabusOrder(topicA, topicB) : Number(topicA === undefined) - Number(topicB === undefined);
+      return bySyllabus || stepOf(a) - stepOf(b);
+    };
+    const currentDay = (leader: string) => dayOfTask(taskById.get(leader)!);
+    const ordered = [...leaders].sort((a, b) => compare(a, b) || currentDay(a).localeCompare(currentDay(b)));
+
+    const target = new Map<string, IsoDate>();
+    for (let start = 0; start < ordered.length; ) {
+      let end = start + 1;
+      while (end < ordered.length && compare(ordered[start]!, ordered[end]!) === 0) end++;
+      const run = ordered.slice(start, end);
+      const free = slots.slice(start, end);
+      const waiting: string[] = [];
+      for (const leader of run) {
+        const keep = free.indexOf(currentDay(leader));
+        if (keep >= 0) {
+          target.set(leader, currentDay(leader));
+          free.splice(keep, 1);
+        } else {
+          waiting.push(leader);
+        }
       }
+      waiting.forEach((leader, index) => target.set(leader, free[index]!));
+      start = end;
+    }
 
-      const cleared: ClearedTask[] = movable.slice(0, MAX_MOVES).map((task) => ({
-        id: task.id,
-        dueDate: task.dueDate,
-        estimatedMinutes: task.estimatedMinutes ?? ASSUMED_TASK_MINUTES,
-        // Homework has a real deadline behind it; a generated study step does not.
-        hasDeadline: task.source === 'homework' || task.source === 'ai_attachment',
-      }));
-
-      for (const placement of planDayClearance({ days, tasks: cleared }).placements) {
-        moveByTaskId.set(placement.taskId, placement.date);
+    let moved = 0;
+    for (const leader of ordered) {
+      const to = target.get(leader)!;
+      if (currentDay(leader) === to) continue;
+      moved++;
+      for (const member of movingPart(leader)) {
+        if (to !== member.dueDate) moveByTaskId.set(member.id, to);
+        else moveByTaskId.delete(member.id);
       }
     }
+    for (const date of window) orderedDates.add(date);
+    syllabusOrders.push({ from, until, moved });
   }
+
+  // Work off an emptied day, and off a day they say they never got to at all
+  // ("bugün hiç çalışamadım"): kept, and spread over the days that can take it.
+  const leaving = new Set<string>();
+  for (const task of tasks) {
+    if (!canMove(task) || explicitMoves.has(task.id)) continue;
+    if (clearedDates.has(task.dueDate) || missedTaskIds.has(task.id)) leaving.add(leaderOf(task));
+  }
+  if (leaving.size > 0) {
+    const days: IsoDate[] = [];
+    for (let ahead = 0; ahead <= CLEAR_WINDOW_DAYS; ahead++) {
+      const date = addDays(logDate, (statedSpreadFrom ?? 0) + ahead);
+      if (!offLimits(date)) days.push(date);
+    }
+    moveCards(leaving, days);
+  }
+
+  // --- Whole courses set aside for a stretch.
+  //
+  // "Bu hafta kimyayı dondur" and "yarın sadece fiziğe çalışacağım" are one
+  // instruction seen from two sides: some courses' work leaves some days. It
+  // goes to the days right after the stretch, where it would have come next
+  // anyway. Work due inside the stretch stays — pausing a course does not
+  // pause the teacher who set the deadline.
+  const holds: ScheduleFacts['holds'] = [];
+  for (const hold of extraction.courseHolds.slice(0, MAX_HOLDS)) {
+    if (!Number.isFinite(hold.fromDaysAhead)) continue;
+    const listed = new Set(hold.courseIds.filter((id) => knownCourses.has(id)));
+    if (listed.size === 0) {
+      droppedReferences++;
+      continue;
+    }
+    const window = stretch(hold.fromDaysAhead, hold.untilDaysAhead);
+    const from = window[0]!;
+    const until = window.at(-1)!;
+    const covers = (task: CandidateTask): boolean => {
+      const course = courseOf(task);
+      const named = course !== null && listed.has(course);
+      return hold.mode === 'pause' ? named : !named;
+    };
+    holds.push({ mode: hold.mode, courseIds: [...listed], from, until });
+
+    const leaders = new Set<string>();
+    for (const task of tasks) {
+      const day = dayOfTask(task);
+      if (!canMove(task) || explicitMoves.has(task.id) || day < from || day > until || !covers(task)) continue;
+      leaders.add(leaderOf(task));
+    }
+    for (const leader of [...leaders]) {
+      const members = movingPart(leader);
+      if (members.some((member) => hasDeadline(member) && member.dueDate <= until)) {
+        leaders.delete(leader);
+        notes.push(`"${taskById.get(leader)?.title}" teslimi bu aralıkta olduğu için yerinde kaldı.`);
+      } else if (members.some(isUrgent)) {
+        leaders.delete(leader);
+        notes.push(`"${taskById.get(leader)?.title}" acil işaretli olduğu için yerinde kaldı.`);
+      }
+    }
+
+    const after: IsoDate[] = [];
+    const lastOffset = diffInDays(logDate, until);
+    for (let ahead = lastOffset + 1; ahead <= lastOffset + CLEAR_WINDOW_DAYS; ahead++) {
+      const date = addDays(logDate, ahead);
+      if (!offLimits(date)) after.push(date);
+    }
+    moveCards(leaders, after);
+  }
+  /** A set-aside course's work must not drift back into its stretch in the repair below. */
+  const heldBack = (task: CandidateTask): boolean =>
+    holds.some((hold) => {
+      if (dayOfTask(task) > hold.until) return false;
+      const course = courseOf(task);
+      const named = course !== null && hold.courseIds.includes(course);
+      return hold.mode === 'pause' ? named : !named;
+    });
+
+  // --- A day with a time limit keeps what fits, earliest in the cycle first.
+  //
+  // What leaves is what costs least to move — a quiz before the page it tests —
+  // and never work due that very day or a day the student chose themselves.
+  for (const [date, budget] of [...budgetByDate].sort(([a], [b]) => a.localeCompare(b))) {
+    if (offLimits(date)) continue;
+    const onDay = new Map<string, CandidateTask[]>();
+    for (const task of tasks) {
+      if (!canMove(task) || dayOfTask(task) !== date) continue;
+      onDay.set(leaderOf(task), [...(onDay.get(leaderOf(task)) ?? []), task]);
+    }
+    const cards = [...onDay.entries()].map(([leader, members]) => ({
+      leader,
+      minutes: minutesOf(members),
+      fixed: members.some(
+        (member) => explicitMoves.has(member.id) || isUrgent(member) || (hasDeadline(member) && member.dueDate <= date),
+      ),
+      rank: Math.min(...members.map((member) => KEEP_RANK[member.type] ?? DEFAULT_KEEP_RANK)),
+    }));
+    cards.sort(
+      (a, b) =>
+        Number(b.fixed) - Number(a.fixed) || a.rank - b.rank || a.minutes - b.minutes || a.leader.localeCompare(b.leader),
+    );
+
+    let used = 0;
+    const overflow: string[] = [];
+    for (const card of cards) {
+      if (card.fixed || used + card.minutes <= budget) used += card.minutes;
+      else overflow.push(card.leader);
+    }
+    if (cards.some((card) => card.fixed) && used > budget) {
+      notes.push(`${relativeDay(date, logDate)} için söylediğin süre, o gün teslimi olan işe yetmiyor.`);
+    }
+
+    const later: IsoDate[] = [];
+    for (let ahead = diffInDays(logDate, date) + 1; ahead <= CLEAR_WINDOW_DAYS; ahead++) {
+      const day = addDays(logDate, ahead);
+      if (!offLimits(day)) later.push(day);
+    }
+    moveCards(overflow, later);
+  }
+
+  // --- "Geciken işleri dağıt": overdue cards into the coming week, the same
+  // way an emptied day's work is spread — deadlines first, room first.
+  if (backlogActions.has('spread') && !backlogActions.has('close')) {
+    const leaders = new Set(
+      tasks.filter((task) => canMove(task) && !explicitMoves.has(task.id) && dayOfTask(task) < logDate).map(leaderOf),
+    );
+    const days: IsoDate[] = [];
+    for (let ahead = 0; ahead <= DEFAULT_STRETCH_DAYS; ahead++) {
+      const date = addDays(logDate, ahead);
+      if (!offLimits(date)) days.push(date);
+    }
+    moveCards(leaders, days);
+    backlog.push({ action: 'spread', tasks: leaders.size });
+  }
+
+  // "Haftayı düzenle": the repair below, over a whole stretch rather than only
+  // what this report touched — and loose concept/Feynman pairs that end up on
+  // one day become one learning card.
+  const tidies: ScheduleFacts['tidies'] = [];
+  const tidyDates = new Set<IsoDate>();
+  for (const tidy of extraction.weekTidies.slice(0, MAX_STRETCH_OPS)) {
+    if (!Number.isFinite(tidy.fromDaysAhead)) continue;
+    const window = stretch(tidy.fromDaysAhead, tidy.untilDaysAhead ?? tidy.fromDaysAhead + DEFAULT_STRETCH_DAYS);
+    for (const date of window) tidyDates.add(date);
+    tidies.push({ from: window[0]!, until: window.at(-1)!, paired: 0 });
+  }
+
+  // --- How much a day should carry, and the order the cycle has to keep.
+  //
+  // Clearing a day is a move, and a move that ignores the study cycle is how a
+  // quiz ends up on the same day as the Feynman page it is meant to test. So
+  // every move this check-in makes — the student's own, the clearance spread,
+  // and any day they gave a size to — goes through one repair pass before it
+  // is written down.
+  const targetByDate = new Map<IsoDate, number>();
+  for (const target of extraction.dayTargets.slice(0, MAX_DAY_TARGETS)) {
+    if (!Number.isFinite(target.daysAhead) || !Number.isFinite(target.maxMainTasks)) continue;
+    const date = addDays(logDate, clampAhead(target.daysAhead));
+    targetByDate.set(date, Math.min(MAX_MAIN_TASKS_PER_DAY, Math.max(0, Math.round(target.maxMainTasks))));
+  }
+
+  if (
+    clearedDates.size > 0 ||
+    targetByDate.size > 0 ||
+    moveByTaskId.size > 0 ||
+    budgetByDate.size > 0 ||
+    tidyDates.size > 0
+  ) {
+    const shapeDays: ShapeDay[] = [];
+    for (let ahead = 0; ahead <= CLEAR_WINDOW_DAYS; ahead++) {
+      const date = addDays(logDate, ahead);
+      if (offLimits(date)) continue;
+      shapeDays.push({ date, capacityMinutes: capacityOn(date), maxMainTasks: targetByDate.get(date) ?? null });
+    }
+
+    // The repair stays inside what this report actually touched. A topic whose
+    // order was already crooked yesterday is not this check-in's business —
+    // that is what the week tidier is for, and it asks first.
+    const affectedTopics = new Set<string>();
+    const affectedDates = new Set<IsoDate>([
+      ...clearedDates,
+      ...targetByDate.keys(),
+      ...budgetByDate.keys(),
+      ...orderedDates,
+      ...tidyDates,
+    ]);
+    for (const [taskId, date] of moveByTaskId) {
+      affectedDates.add(date);
+      const task = taskById.get(taskId);
+      if (task) affectedTopics.add(task.topicId);
+    }
+    for (const task of tasks) {
+      if (clearedDates.has(task.dueDate)) affectedTopics.add(task.topicId);
+    }
+
+    const shapeTasks: ShapeTask[] = tasks.map((task) => ({
+      id: task.id,
+      topicId: task.topicId,
+      step: studyStepOf(task.type),
+      // The clearance spread has already had its say; the repair starts there.
+      dueDate: dayOfTask(task),
+      // A container's time is its steps' time; counting it again made a
+      // one-hour learning card weigh ninety minutes.
+      estimatedMinutes: hasListedSteps.has(task.id) ? 0 : (task.estimatedMinutes ?? ASSUMED_TASK_MINUTES),
+      parentId: task.parentTaskId,
+      hasDeadline: hasDeadline(task),
+      // Work already sitting on its own deadline has nowhere left to go: later
+      // is past it, and the repair never pulls work earlier.
+      isMovable:
+        canMove(task) &&
+        !heldBack(task) &&
+        !isUrgent(task) &&
+        !(hasDeadline(task) && dayOfTask(task) >= task.dueDate) &&
+        (affectedTopics.has(task.topicId) || affectedDates.has(dayOfTask(task))),
+    }));
+
+    const shaped = planWeekShape({
+      today: logDate,
+      days: shapeDays,
+      tasks: shapeTasks,
+      groupExistingPairs: tidyDates.size > 0,
+    });
+    for (const move of shaped.moves) moveByTaskId.set(move.taskId, move.to);
+    notes.push(...shaped.notes);
+
+    // Pairs the repair left on one day, inside a stretch the student asked to
+    // tidy: one sitting, so one learning card — made the same way a grouping
+    // in the report makes one, and undone the same way.
+    for (const pairing of shaped.pairings) {
+      if (!tidyDates.has(pairing.date)) continue;
+      const pair = [pairing.conceptTaskId, pairing.feynmanTaskId].map((id) => taskById.get(id));
+      if (pair.some((task) => !task || groupedChildIds.has(task.id) || !isLoose(task))) continue;
+      if (openContainer(pair as CandidateTask[], null) === null) continue;
+      const tidy = tidies.find((entry) => entry.from <= pairing.date && pairing.date <= entry.until);
+      if (tidy) tidy.paired++;
+    }
+  }
+
+  // A learning card is one sitting: its container stands on the day its
+  // steps are, whichever of the moves above put them there.
+  for (const container of tasks) {
+    if (container.type !== 'learning' || !hasListedSteps.has(container.id) || ungrouped.has(container.id)) continue;
+    if (!canMove(container)) continue;
+    const stepDays = (cardMembers.get(container.id) ?? [])
+      .filter((member) => member.id !== container.id && canMove(member))
+      .map(dayOfTask)
+      .sort();
+    const day = stepDays[0];
+    if (day === undefined || day === dayOfTask(container)) continue;
+    if (day !== container.dueDate) moveByTaskId.set(container.id, day);
+    else moveByTaskId.delete(container.id);
+  }
+  for (const title of lateTitles) notes.push(`"${title}" teslim tarihinden önce yer bulamadı; teslimden sonraya kondu.`);
 
   const taskMoves: TaskMoveRow[] = [...moveByTaskId].map(([task_id, due_date]) => ({ task_id, due_date }));
 
@@ -1109,9 +2117,8 @@ export function planCheckinEffects({
 
   let spread = 0;
   const dueByDraftId = new Map<string, IsoDate>();
-  const newTasks: NewTaskRow[] = drafts
-    .slice(0, MAX_NEW_TASKS)
-    .map(({ fixed_due_date, follows_parent, id, parent_task_id, ...draft }) => {
+  const newTasks: NewTaskRow[] = [
+    ...drafts.slice(0, MAX_NEW_TASKS).map(({ fixed_due_date, follows_parent, id, parent_task_id, ...draft }) => {
       const taskId = id ?? crypto.randomUUID();
       const due =
         (follows_parent ? dueByDraftId.get(follows_parent) : undefined) ??
@@ -1119,8 +2126,36 @@ export function planCheckinEffects({
         addDays(logDate, 1 + Math.floor(spread++ / MAX_NEW_TASKS_PER_DAY));
       dueByDraftId.set(taskId, due);
       return { ...draft, id: taskId, parent_task_id: parent_task_id ?? null, due_date: due };
-    });
+    }),
+    // A sprint has its own days and its own cap: it is not rescheduled work.
+    ...cramRows,
+    // A group's container stands where its steps end up — after every move
+    // above, not where they were when the report began. It was computed from
+    // the old days once, and a card was left on Monday with its steps on
+    // Tuesday.
+    ...containerDrafts.map(({ steps, ...draft }): NewTaskRow => {
+      const days = steps
+        .map((id) => taskById.get(id))
+        .filter((task): task is CandidateTask => task !== undefined)
+        .map(dayOfTask)
+        .sort();
+      return { ...draft, parent_task_id: null, due_date: days.at(-1) ?? logDate };
+    }),
+  ];
 
+  // --- Questions: which one, and for an agenda which day. The answer is not
+  // written here — it has to read the plan as it stands once all of the above
+  // has been applied.
+  const questions: PlanQuestion[] = [];
+  for (const request of extraction.infoRequests.slice(0, MAX_QUESTIONS)) {
+    // "Neler var?" asked in an evening report is about the next day.
+    const offset = request.daysAhead !== null && Number.isFinite(request.daysAhead) ? request.daysAhead : 1;
+    const date = request.kind === 'day_agenda' ? addDays(logDate, clampAhead(offset)) : null;
+    if (questions.some((question) => question.kind === request.kind && question.date === date)) continue;
+    questions.push({ kind: request.kind, date });
+  }
+
+  const bulkIds = new Set(bulkCompleted.map((outcome) => outcome.taskId));
   return {
     summary: clamp(extraction.summary, 500) ?? 'Check-in processed.',
     coveredDates: [...coveredDates].sort(),
@@ -1138,7 +2173,32 @@ export function planCheckinEffects({
     mistakeResolutions,
     taskMoves,
     blockWeekdays: [...newlyClosedWeekdays].sort((a, b) => a - b),
+    reopenWeekdays: [...reopenedWeekdays].sort((a, b) => a - b),
     clearedDates: [...clearedDates].sort(),
+    extraWork,
+    taskUngroups,
+    examScopes,
+    examResults,
+    priorities,
+    examLinks,
+    reminders,
+    schedule: {
+      missedDates: [...missedDates].sort(),
+      dayBudgets: [...budgetByDate]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, minutes]) => ({ date, minutes })),
+      holds,
+      bulkCompletedTaskIds: taskUpdates
+        .filter((update) => bulkIds.has(update.task_id) && update.new_status === 'completed')
+        .map((update) => update.task_id),
+      examPlans,
+      swaps,
+      syllabusOrders,
+      tidies,
+      backlog,
+    },
+    questions,
+    notes: [...new Set(notes)],
     unmatchedMentions: extraction.unmatchedMentions
       .slice(0, MAX_MENTIONS)
       .map((m) => clamp(m, 200))

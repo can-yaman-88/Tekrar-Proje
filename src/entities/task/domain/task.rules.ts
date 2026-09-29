@@ -43,6 +43,8 @@ export function withStatus(task: Task, status: TaskStatus, now: Date = new Date(
 
 const TYPE_WEIGHT: Record<TaskType, number> = {
   mock_exam: 4,
+  // A learning task opens with the concept page, so it is worth what one is.
+  learning: 2,
   // The loop's own order: finishing a started topic beats starting a new one.
   advanced_problems: 4,
   feynman: 4,
@@ -67,8 +69,14 @@ export function priorityScore(task: Task, today: IsoDate, daysToNextExam: number
   const deadlinePressure = isHomework(task)
     ? Math.max(0, DEADLINE_HORIZON_DAYS - Math.max(0, diffInDays(today, task.dueDate))) * 3
     : 0;
-  return overdueDays * 10 + examPressure + confidenceGap + deadlinePressure + TYPE_WEIGHT[task.type];
+  // Urgent is the student's own word on what comes first, and it outranks
+  // every pressure the app can infer — lateness included.
+  const urgency = task.isPriority ? URGENT_BONUS : 0;
+  return urgency + overdueDays * 10 + examPressure + confidenceGap + deadlinePressure + TYPE_WEIGHT[task.type];
 }
+
+/** Larger than any score the other pressures reach in practice. */
+const URGENT_BONUS = 1_000;
 
 /** Beyond this many days a deadline exerts no pull on today's order. */
 const DEADLINE_HORIZON_DAYS = 8;
@@ -104,6 +112,7 @@ export const TASK_GROUP_LABEL: Record<TaskGroup, string> = {
 const GROUP_BY_TYPE: Record<TaskType, TaskGroup> = {
   concept_note: 'concepts',
   concept_review: 'concepts',
+  learning: 'concepts',
   quiz: 'quiz',
   advanced_problems: 'quiz',
   problem_set: 'quiz',
@@ -121,6 +130,19 @@ const GROUP_BY_TYPE: Record<TaskType, TaskGroup> = {
 export const taskGroupOf = (task: Pick<Task, 'type' | 'source'>): TaskGroup =>
   isHomework(task) ? 'homework' : GROUP_BY_TYPE[task.type];
 
+/**
+ * Every label a card answers to: its own, and each of the steps it shows.
+ *
+ * A learning card is labelled "Concepts", yet half of it is the Feynman page;
+ * filtering by one task's label alone hid every grouped Feynman page from the
+ * "Feynman" chip — and a report's group, labelled by where it came from, hid
+ * all of its steps from every chip but one.
+ */
+export const cardGroupsOf = (
+  card: Pick<Task, 'type' | 'source'>,
+  steps: readonly Pick<Task, 'type' | 'source'>[] = [],
+): Set<TaskGroup> => new Set([taskGroupOf(card), ...steps.map(taskGroupOf)]);
+
 /** The task type each label creates when the user picks it by hand. */
 export type EditableTaskType = 'concept_note' | 'quiz' | 'feynman';
 
@@ -131,11 +153,18 @@ export const TASK_TYPE_BY_GROUP: Record<Exclude<TaskGroup, 'homework'>, Editable
   feynman: 'feynman',
 };
 
-/** Which of the three editable labels a task sits under, homework included. */
+/**
+ * Which of the three editable labels a task sits under, homework included.
+ *
+ * Homework has its own label on the board, but nobody edits a task into
+ * "Ödev" — that is decided by where the work came from. So the type's own
+ * group is the answer here, for homework as much as for anything else.
+ */
 export const editableGroupOf = (task: Pick<Task, 'type' | 'source'>): Exclude<TaskGroup, 'homework'> =>
-  GROUP_BY_TYPE[task.type] === 'homework' ? 'quiz' : (GROUP_BY_TYPE[task.type] as Exclude<TaskGroup, 'homework'>);
+  GROUP_BY_TYPE[task.type] as Exclude<TaskGroup, 'homework'>;
 
 export const TASK_TYPE_LABEL: Record<TaskType, string> = {
+  learning: 'Öğrenme',
   concept_note: 'Concepts',
   concept_review: 'Concepts',
   quiz: 'Sınav',

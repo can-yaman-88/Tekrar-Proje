@@ -6,13 +6,15 @@
 // call failed before a request was ever sent. A guard is only as good as the
 // input it was measured against, so the real schemas are the input here.
 import { assertEquals } from 'jsr:@std/assert@1';
-import { CheckinExtractionSchema } from '../contracts/daily-checkin.contract.ts';
+import { CheckinPlanSchema, CheckinProgressSchema } from '../contracts/daily-checkin.contract.ts';
 import { SyllabusExtractionSchema } from '../contracts/syllabus.contract.ts';
 import { PlanPhrasingSchema } from '../contracts/weekly-plan.contract.ts';
 import { toStrictJsonSchema, type JsonValue } from './json-schema.ts';
 
 const WIRE_SCHEMAS = {
-  checkin_extraction: CheckinExtractionSchema,
+  // The check-in goes out as two readers' schemas; the merged one never does.
+  checkin_progress: CheckinProgressSchema,
+  checkin_plan: CheckinPlanSchema,
   syllabus_extraction: SyllabusExtractionSchema,
   plan_phrasing: PlanPhrasingSchema,
 } as const;

@@ -1,4 +1,10 @@
-export { cancelAllReminders, configureNotifications, registerNotificationCategories } from './data/notifications';
+export {
+  cancelAllReminders,
+  cancelReportReminders,
+  configureNotifications,
+  registerNotificationCategories,
+} from './data/notifications';
+export { useReportReminders } from './model/useReportReminders';
 export { useBannerStore } from './model/banner.store';
 export { learnReminderHours, toStudyMoment, type LearnedReminder } from './domain/reminder-time';
 export { useNotificationActions } from './model/useNotificationActions';
