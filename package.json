@@ -1,7 +1,7 @@
 {
   "name": "tekrar",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@hookform/resolvers": "^5.9.1",
@@ -30,6 +30,7 @@
     "react-dom": "19.2.3",
     "react-hook-form": "^7.88.0",
     "react-native": "0.86.3",
+    "react-native-android-widget": "^0.22.1",
     "react-native-mmkv": "^4.3.2",
     "react-native-nitro-modules": "^0.37.1",
     "react-native-safe-area-context": "~5.7.0",

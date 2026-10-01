@@ -1,5 +1,6 @@
 import { useSessionStore } from '@entities/session';
 import { useCheckinDraftStore } from '@features/daily-check-in';
+import { clearHomeWidget } from '@features/home-widget';
 import { cancelAllReminders } from '@features/reminders';
 import { clearPersistedQueryCache } from '@shared/api/query';
 import { supabase } from '@shared/api/supabase';
@@ -34,6 +35,7 @@ export function useAuthListener(): void {
         clearPersistedQueryCache();
         useCheckinDraftStore.getState().reset();
         void cancelAllReminders();
+        clearHomeWidget();
       }
     });
 

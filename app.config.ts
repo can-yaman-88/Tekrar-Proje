@@ -82,6 +82,29 @@ const config: ExpoConfig = {
       },
     ],
     [
+      // Android home-screen widget: today's work, due reviews, one tap to the
+      // evening report. Drawn by src/features/home-widget.
+      'react-native-android-widget',
+      {
+        widgets: [
+          {
+            name: 'Today',
+            label: 'Tekrar · Bugün',
+            description: 'Bugünün işleri, tekrar bekleyen konular ve değerlendirme kısayolu',
+            minWidth: '250dp',
+            minHeight: '110dp',
+            targetCellWidth: 4,
+            targetCellHeight: 2,
+            maxResizeHeight: '420dp',
+            resizeMode: 'horizontal|vertical',
+            // Every 30 minutes (Android's minimum): also how it turns the page at midnight.
+            updatePeriodMillis: 1800000,
+            previewImage: './assets/widget-preview.png',
+          },
+        ],
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         image: './assets/splash-icon.png',

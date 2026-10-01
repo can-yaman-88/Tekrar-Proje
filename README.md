@@ -210,6 +210,30 @@ görevi kapatır, **Değerlendirme yaz** doğrudan değerlendirme ekranını aç
 önce kurulmuş olabileceği için "Bitirdim" önce görevi sunucudan okur; görev bu arada
 kapanmış ya da silinmişse dokunmaz, sana durumu söyler.
 
+## Ana ekran widget'ı (Android)
+
+**Tekrar · Bugün** widget'ı (ana ekranda boş yere basılı tut → Widget'lar → Tekrar): bugünün açık
+işleri (gecikenler ve acil olanlar önce), "2/5" ilerlemesi, bugün tekrarı gelen konu sayısı ve
+**Değerlendirme** kısayolu. Boyutu değiştirilebilir; yükseldikçe daha çok iş sığar, sığmayanlar
+"+3 iş daha" olur.
+
+- **Daireye dokun → görev biter.** Widget hemen işaretler, sunucuya da yazar; bağlantı yoksa geri
+  alır ve "İşaretlenemedi" der (görev ana ekranda bitmiş görünüp uygulamada açık kalmaz). Puan
+  isteyen işler — tekrar görevi ("Nasıl geçti?") ve karışık set (konu konu puan) — işaretlenmez,
+  dokununca uygulamada açılır (dairede `›`).
+- **Göreve dokun → görev ekranı**, alt satıra dokun → Defter, düğmeye dokun → değerlendirme.
+- **Gece yarısını kendisi geçer.** Uygulama açıkken bugünün ve sonraki iki günün listesi cihaza
+  yazılır (bugün bitmeyen iş yarına "gecikti" olarak taşınır); widget her 30 dakikada bir — Android'in
+  izin verdiği en sık aralık — kendini yeniden çizer. Üç günden uzun açılmazsa "uygulamayı bir kez
+  aç" der, eski listeyi bugünün listesi gibi göstermez.
+- Çıkış yapınca widget hesabı unutur. Widget'ın listesi şifresiz saklanır (arka planda uygulama
+  olmadan okunabilsin diye); içindekiler zaten ana ekranda görünen şeylerdir.
+
+Yerel modül olduğu için widget **yeni bir APK** ister: `rm -rf android` sonra `npm run apk`.
+Kod: `src/features/home-widget` (çizim ve kararlar saf fonksiyonlar, testli),
+`src/core/bootstrap/homeWidget.ts` ve giriş dosyası `index.ts` (Android widget'ı çizmek için
+uygulamanın JS'ini ekransız başlatır; görev o anda kayıtlı olmalı).
+
 ## Çalışma zamanlayıcısı
 
 Görev ekranında **Çalışma süresi** kartı var: başlat–bitir ile gerçek süre ölçülür, ya da
