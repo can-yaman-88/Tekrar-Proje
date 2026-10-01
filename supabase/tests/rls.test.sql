@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(90);
+select plan(92);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -724,6 +724,28 @@ select is(
      from generate_series(1, 3) n),
   '{t,t,f}',
   'the third call inside the window is refused'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 14. The offline queue: a mistake-book entry keeps the id the phone gave it,
+--     and sending it twice cannot make two.
+-- ---------------------------------------------------------------------------
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select lives_ok(
+  $$insert into public.topic_mistakes (id, user_id, topic_id, body)
+    values ('f0000000-0000-4000-8000-0000000000aa', 'aaaaaaaa-0000-4000-8000-000000000001',
+            'd0000000-0000-4000-8000-00000000000a', 'paydayı ters alıyorum')$$,
+  'an entry written offline keeps the id chosen on the device'
+);
+select throws_ok(
+  $$insert into public.topic_mistakes (id, user_id, topic_id, body)
+    values ('f0000000-0000-4000-8000-0000000000aa', 'aaaaaaaa-0000-4000-8000-000000000001',
+            'd0000000-0000-4000-8000-00000000000a', 'paydayı ters alıyorum')$$,
+  '23505',
+  null,
+  'replaying the same entry is a unique violation (the app reads it as already saved), never a duplicate'
 );
 reset role;
 

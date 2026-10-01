@@ -50,16 +50,26 @@ Demo veri: `docker exec -i supabase_db_tekrar psql -U postgres < supabase/script
 ```fish
 npx tsc --noEmit        # tip kontrolü
 npx expo lint           # katman sınırları dahil
-npx jest                # alan (domain) testleri
+npx jest                # alan (domain) ve altyapı testleri (ayar: jest.config.js)
 npx expo-doctor         # bağımlılık uyumu
-npx supabase test db    # RLS izolasyon testleri (pgTAP)
+npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 92 test)
 ```
 
 Edge Function testleri (Deno kurulu değilse Docker ile):
 
 ```fish
+cd supabase/functions/_shared; and deno test; cd -               # ortak alan mantığı
+# her fonksiyon kendi deno.json'uyla, kendi klasöründe denetlenir
+for fn in daily-checkin generate-weekly-plan ingest-syllabus llm-models
+  cd supabase/functions/$fn; and deno check index.ts; and deno test --allow-all; cd -
+end
 docker run --rm -v (pwd)/supabase/functions:/fn -w /fn/daily-checkin denoland/deno:latest deno test planner.test.ts
 ```
+
+**CI** (`.github/workflows/ci.yml`) her push ve PR'da üç işi koşar: uygulama (`npm ci`, tsc,
+lint, Jest), Edge Functions (Deno testleri ve tip kontrolü) ve veritabanı (`supabase start`,
+`supabase test db`; ardından `supabase gen types` çıktısı depodaki tiplerle karşılaştırılır,
+fark varsa uyarı verir).
 
 ## Bilgisayardan bağımsız kullanım (barındırılan Supabase)
 
@@ -83,7 +93,11 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk
 ```
 
 `npm run deploy:backend` şunları yapar: migration'ları gönderir, `supabase/functions/.env`
-içindeki yapay zekâ anahtarlarını proje sırrı olarak ayarlar, üç Edge Function'ı yayına alır.
+içindeki yapay zekâ anahtarlarını proje sırrı olarak ayarlar, Edge Function'ları yayına alır.
+
+**Sıra önemli:** yeni uygulama sürümü yeni RPC'leri (`set_task_status`, `skip_tasks`,
+`register_push_token`, `report_app_error` …) çağırır. Önce `npm run deploy:backend`, sonra APK.
+Şema değiştiyse `npm run db:types` ile tipleri yeniden üret.
 
 Panoda bir kez yapılacak ayar: **Authentication → Providers → Email**. E-posta onayı açıksa
 kayıt olurken gelen bağlantıya tıklaman gerekir; kapatırsan doğrudan giriş yaparsın.
@@ -132,7 +146,15 @@ Kısayol: `npm run apk` (barındırılan proje, `.env.production`) veya
 **Haftalık plan pazartesileri kendiliğinden üretilir.** Bulut veritabanındaki cron işi
 (`weekly-plan`, pazartesi 05:00 UTC) her profil için `generate-weekly-plan` çağırır. Kurulum
 tek seferlik: `configure_weekly_plan_cron(url, service_key)` fonksiyonunu servis anahtarıyla
-çağırmak yeterli — anahtar Vault'ta saklanır, cron komutunda görünmez.
+çağırmak yeterli — anahtar Vault'ta saklanır, cron komutunda görünmez. (Bu iş daha önce pg_net'te
+olmayan `extensions.net_http_post`'u çağırdığı için hiç çalışmıyordu; artık `net.http_post`.)
+Plan, öğrencinin kendi saat dilimindeki haftaya göre kurulur (`user_today`).
+
+**Henüz işlenmemiş konu planlanmaz.** Bir dersin dönem başlangıcı biliniyorsa (ders sayfası →
+**Dönem haftası**: "bu hafta kaçıncı hafta?" sorusuna verilen cevaptan hesaplanır) haftalık plan
+o haftadan sonraki konulara dokunmaz; bu hafta işlenen konu da ilk ders gününden önceye konmaz.
+Planın notu kaç konunun bu yüzden bekletildiğini söyler. Dönem başlangıcı girilmemiş derste
+eski davranış sürer.
 
 **Günlük bütçe ölçülür, varsayılmaz.** Son 6 haftada gerçekten yaptığın iş gün gün ortalanır:
 pazartesi 45 dakika, cumartesi 180 dakika gibi. Plan her günü kendi bütçesine göre doldurur.
@@ -283,7 +305,27 @@ bir kez üretilir, günün kalan bütçesi gözetilir, kapalı güne konmaz. Haf
 vadesinden önceki bir güne koymaz.
 
 Tekrar görevini bitirirken **"Nasıl geçti?"** diye 1–5 sorulur; bu puan konunun son güven
-puanıdır. Ayarlar → Hatırlatmalar → **Tekrar zamanı** açıksa tekrar günü bildirim gelir.
+puanıdır. Ayarlar → Hatırlatmalar → **Tekrar zamanı** açıksa tekrar günü bildirim gelir:
+
+- Derlemede EAS proje kimliği varsa (`EAS_PROJECT_ID`, aşağıya bak) ve bildirim izni verildiyse
+  hatırlatma **sunucudan push** olarak gelir: saatlik `review-reminders` cron işi
+  (`send_review_reminders`) her öğrencinin kendi saatinde, o gün vadesi gelen konuları — en zayıfı
+  önce — tek bildirimde yollar. Uygulama haftalarca açılmasa da gelir. Bildirime dokunmak
+  Defter'i açar. Çıkış yapınca cihazın kaydı silinir.
+- Push yoksa (emülatör, kimliksiz derleme, çevrimdışı) hatırlatmalar eskisi gibi cihazda kurulur.
+
+Push kurulumu tek seferlik:
+
+1. `npx eas-cli@latest init` → verdiği proje kimliğini `.env.production`'a `EAS_PROJECT_ID=...`
+   olarak yaz (`app.config.ts` bunu `extra.eas.projectId`'ye koyar).
+2. Android FCM ile teslim eder: Firebase konsolunda `com.tekrar.app` için bir Android uygulaması
+   ekle, `google-services.json`'u proje köküne koy (git'e girmez) ve `.env.production`'a
+   `GOOGLE_SERVICES_JSON=./google-services.json` yaz. Ardından aynı Firebase projesinin servis
+   hesabı anahtarını Expo'ya ver: `npx eas-cli@latest credentials` → Android → FCM V1.
+3. İsteğe bağlı: Expo hesabında "Enhanced push security" açıksa erişim jetonunu Vault'a koy:
+   `select vault.create_secret('<token>', 'expo_access_token');`
+
+Bu adımlardan biri eksikse uygulama sessizce yerel hatırlatmalarda kalır; hiçbir şey kırılmaz.
 
 Her sayılan tekrar `topic_review_events` tablosuna yazılır (gün, kaynak, kalite, güven, isabet,
 aralığın önceki ve sonraki hali). Bir konuya dokunduğunda **konu ekranı** açılır: sıradaki tekrar,
@@ -301,6 +343,7 @@ Alt sekmelerden biri **Defter**, iki bölümlü:
   filtresi, arama ve ders çipleri; her maddede kayıt günü, nereden geldiği ve hangi görevde
   takıldığın. **✓ Çözdüm** bildirimdeki **Geri al** ile geri alınır, çözülen madde **Geri aç**
   ile yeniden açılır; basılı tutunca düzenleme ve silme. Bir konuya elle madde eklenebilir.
+  Hepsi anında görünür ve çevrimdışıyken de çalışır (bkz. Çevrimdışı davranış).
 
 **Dersler** artık alt sekmede değil — dönemde birkaç kez gerektiği için **Ayarlar → Dersler ve
 izlence** altında. Ders ekleme, izlence yükleme, ders programı ve tekrar radarı oradan açılır.
@@ -421,9 +464,19 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 74 pgTAP testi
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 92 pgTAP testi
   bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
   satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
+- **Görev durumu tek kapıdan değişir.** `guard_task_status` tetikleyicisi, uygulamanın
+  `tasks.status`'u doğrudan PATCH ile değiştirmesini reddeder; durum yalnızca `set_task_status`,
+  `skip_tasks`, `move_tasks` ve değerlendirme fonksiyonlarından geçer. Böylece tekrar takvimi
+  hiçbir yoldan atlanamaz.
+- **Sınav sonucu sunucuda hesaplanır.** Uygulama yalnızca "nasıl geçti" cevabını ve işaretlenen
+  konuları gönderir; SM-2 değerleri `apply_exam_retro` içinde `sm2_next` ile bulunur.
+- **Hız sınırı:** yapay zekâ çağıran fonksiyonlar kullanıcı başına saatte sınırlıdır
+  (değerlendirme 20, izlence 10, haftalık plan 10, model listesi 30, model denemesi 10). Aşılınca
+  uygulama "biraz bekle" der (HTTP 429, `rate_limited`). Sayaç `rate_limit_hits` tablosundadır,
+  iki günden eski satırlar silinir.
 - Alt tablolar ana tabloya iki sütunlu (id + user_id) yabancı anahtarla bağlıdır: başka bir
   kullanıcının verisine bağlanmak veritabanı düzeyinde imkânsızdır.
 - Oturum anahtarları ve önbelleğe alınmış veriler cihazda şifreli saklanır; şifreleme anahtarı
@@ -438,7 +491,32 @@ OpenRouter etkinlik kaydında da görünmez.
 - Görev işaretleme, düzenleme, silme, not ekleme ve çalışma süresi kaydı çevrimdışıyken
   kuyruğa alınır ve bağlantı gelince kendiliğinden gönderilir (uygulama kapanıp açılsa bile).
   Süre kayıtları kendi zaman damgalarını taşır: geç gönderilse de gerçek saatiyle yazılır.
+- Hata defteri (ekleme, düzeltme, çözdüm, geri aç, silme) ve ayarlar (günlük kapasite, kapalı
+  günler, otomatik haftalık plan) da aynı kuyruktadır. Değişiklik ekranda hemen görünür; her
+  alanın kuyruğu sırayla boşalır (çevrimdışı eklenip sonra düzeltilen madde önce eklenir).
+  Yeni maddenin kimliği cihazda üretilir; aynı yazma iki kez gitse de çift kayıt oluşmaz.
+  Sunucu reddederse ekran eski haline döner ve nedenini söyler.
+- Yapay zekâ anahtarı kuyruğa girmez: bağlantı yoksa hemen hata verir, sır diske yazılmaz.
 - Görevler ekranındaki şerit hem çevrimdışı olduğunu hem de kaç değişikliğin beklediğini yazar.
+
+## Hata raporları
+
+Öğrencinin düzeltemeyeceği hatalar (sunucu hatası, beklenmeyen istisna) kendiliğinden
+`app_error_reports` tablosuna yazılır — bağlantı yok, form hatası, oturum süresi gibi beklenen
+durumlar yazılmaz.
+
+- **Uygulama:** başarısız sorgu ve yazmalar, ekranı çökerten render hataları ve React dışında
+  yakalanmayan JS hataları `report_app_error` RPC'siyle gönderilir
+  (`src/shared/api/telemetry`). Aynı hata 10 dakikada bir kez, bir çalıştırmada en çok 20 rapor;
+  sunucu da kullanıcı başına saatte 30 ile sınırlar. Uygulamayı kapatan hata cihaza yazılır ve
+  bir sonraki açılışta gönderilir. Geliştirme derlemesinde yalnızca konsola yazılır.
+- **Edge Functions:** 500 ve üstü her yanıt, istek kimliğiyle birlikte aynı tabloya yazılır.
+- Raporlar uygulamadan okunamaz; panodan (SQL Editor) bakılır, 90 gün sonra silinir:
+
+  ```sql
+  select created_at, source, kind, message, detail->>'where', app_version, platform
+    from app_error_reports order by created_at desc limit 50;
+  ```
 
 ## Çalışma döngüsü
 
@@ -508,5 +586,5 @@ Model çağrıları iki yönde de doğrulanır (`supabase/functions/_shared/llm/
 kez tüm yapay zekâ çağrılarını sessizce durdurdu: koruma, koruduğu şeyle birlikte test edilir.
 
 Sayısal alanlarda şemaya sınır yazılmaz (bazı sağlayıcılar reddediyor); değerler kod
-tarafında kırpılır. Sınav modunun RPC'leri de aynı mantıkla davranır: kolaylık katsayısı,
-aralık ve tekrar tarihi veritabanında sınırlanır.
+tarafında kırpılır. Sınav modunda ise SM-2 değerleri hiç istemciden gelmez: veritabanı
+`sm2_next` ile kendisi hesaplar.

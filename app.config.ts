@@ -20,6 +20,13 @@ const allowCleartext = process.env.TEKRAR_ALLOW_CLEARTEXT === '1';
  */
 const easProjectId = process.env.EAS_PROJECT_ID;
 
+/**
+ * Android delivers push through FCM, which needs the Firebase project's
+ * google-services.json in the build. Kept out of git; point at it when
+ * building: GOOGLE_SERVICES_JSON=./google-services.json npm run apk
+ */
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
+
 const config: ExpoConfig = {
   name: 'Tekrar',
   slug: 'tekrar',
@@ -41,6 +48,7 @@ const config: ExpoConfig = {
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
+    ...(googleServicesFile ? { googleServicesFile } : {}),
   },
   web: {
     favicon: './assets/favicon.png',

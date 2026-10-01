@@ -51,3 +51,7 @@ yarn-error.*
 supabase/.temp/
 supabase/.branches/
 supabase/functions/.env
+
+# Firebase config for Android push (per-developer, passed via GOOGLE_SERVICES_JSON)
+google-services.json
+GoogleService-Info.plist

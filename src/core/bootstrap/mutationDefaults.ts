@@ -1,5 +1,6 @@
 import {
   PROFILE_SCOPE,
+  profileKeys,
   profileMutationKeys,
   runSetAutoWeeklyPlan,
   runSetBlockedWeekdays,
@@ -15,6 +16,7 @@ import {
   runResolveMistake,
   runUpdateMistake,
   TOPIC_MISTAKE_SCOPE,
+  topicMistakeKeys,
   topicMistakeMutationKeys,
 } from '@entities/topic-mistake';
 import { runToggle } from '@features/task-toggle-status';
@@ -77,18 +79,31 @@ export function registerMutationDefaults(): void {
     mutationFn: ({ taskId, minutes }: LogSessionVariables) => taskSessionRepository.logManual(taskId, minutes),
   });
 
-  // The mistake book and the settings each drain as one ordered queue.
-  const book = { scope: TOPIC_MISTAKE_SCOPE };
+  // The mistake book and the settings each drain as one ordered queue. A
+  // write replayed after a restart has no screen hook to refresh after it,
+  // so the defaults do; a live hook's own onSettled takes their place.
+  const book = {
+    scope: TOPIC_MISTAKE_SCOPE,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: topicMistakeKeys.all }),
+  };
   queryClient.setMutationDefaults(topicMistakeMutationKeys.add, { ...book, mutationFn: runAddMistake });
   queryClient.setMutationDefaults(topicMistakeMutationKeys.update, { ...book, mutationFn: runUpdateMistake });
   queryClient.setMutationDefaults(topicMistakeMutationKeys.resolve, { ...book, mutationFn: runResolveMistake });
   queryClient.setMutationDefaults(topicMistakeMutationKeys.reopen, { ...book, mutationFn: runReopenMistake });
   queryClient.setMutationDefaults(topicMistakeMutationKeys.remove, { ...book, mutationFn: runDeleteMistake });
-  const profile = { scope: PROFILE_SCOPE };
+  const profile = {
+    scope: PROFILE_SCOPE,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: profileKeys.all }),
+  };
+  // Capacity feeds every plan on screen, not just the settings card.
+  const capacity = { scope: PROFILE_SCOPE, onSettled: () => queryClient.invalidateQueries() };
   queryClient.setMutationDefaults(profileMutationKeys.autoWeeklyPlan, { ...profile, mutationFn: runSetAutoWeeklyPlan });
-  queryClient.setMutationDefaults(profileMutationKeys.blockedWeekdays, { ...profile, mutationFn: runSetBlockedWeekdays });
+  queryClient.setMutationDefaults(profileMutationKeys.blockedWeekdays, {
+    ...capacity,
+    mutationFn: runSetBlockedWeekdays,
+  });
   queryClient.setMutationDefaults(profileMutationKeys.capacityOverrides, {
-    ...profile,
+    ...capacity,
     mutationFn: runSetCapacityOverrides,
   });
 }
