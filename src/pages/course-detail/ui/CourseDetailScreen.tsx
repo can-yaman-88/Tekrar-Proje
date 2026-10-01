@@ -5,6 +5,7 @@ import { AppText, Button, Card, ErrorState, Screen, Skeleton, makeStyles, useThe
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useCourseDetailScreen } from '../model/useCourseDetailScreen';
+import { TermWeekCard } from '@features/term-week';
 
 export function CourseDetailScreen() {
   const { courseId } = useLocalSearchParams<{ courseId: string }>();
@@ -14,6 +15,7 @@ export function CourseDetailScreen() {
     retry,
     view,
     examEditor,
+    term,
     onToggleAdvanced,
     isTogglingAdvanced,
     onDelete,
@@ -64,6 +66,8 @@ export function CourseDetailScreen() {
             </Card>
           ))}
         </View>
+
+        <TermWeekCard term={term} />
 
         <View style={styles.section}>
           <AppText variant="label" tone="muted">

@@ -6,6 +6,7 @@ import { addDays } from '../_shared/domain/dates.ts';
 import type { TypedClient } from '../_shared/supabase.ts';
 import type { StudyStep } from '../_shared/contracts/enums.contract.ts';
 import { FIRST_CYCLE } from './study-cycle.ts';
+import { resolveTermStarts } from '../_shared/domain/term.ts';
 import {
   type CapacityProfile,
   localDateIn,
@@ -40,6 +41,8 @@ export interface PlanContext {
   capacity: CapacityProfile;
   /** Homework with its own deadline, which the plan has to make room for. */
   commitments: PlanCommitment[];
+  /** Monday of week 1 per course — its own, or the semester's shared one. */
+  termStartByCourse: Record<string, IsoDate | null>;
 }
 
 const isStudyStep = (type: string): type is StudyStep => (FIRST_CYCLE as readonly string[]).includes(type);
@@ -58,9 +61,20 @@ export class WeeklyPlanRepository {
     private readonly userId: string,
   ) {}
 
+  /**
+   * Today on the student's own calendar. The cron job runs at a fixed UTC hour
+   * and the server's clock is UTC; which week "this week" is depends on where
+   * the student is.
+   */
+  async localToday(): Promise<IsoDate> {
+    const { data, error } = await this.service.from('profiles').select('timezone').eq('id', this.userId).maybeSingle();
+    if (error) throw dbError('load timezone', error);
+    return localDateIn(new Date().toISOString(), data?.timezone ?? 'UTC');
+  }
+
   /** Everything the planner scores on, in scoped reads. */
   async loadContext(weekStart: IsoDate, weekEnd: IsoDate): Promise<PlanContext> {
-    const [topicsResult, examsResult, linksResult, tasksResult, classResult, sessionsResult, profileResult] =
+    const [topicsResult, examsResult, linksResult, tasksResult, classResult, sessionsResult, profileResult, coursesResult] =
       await Promise.all([
         this.service
           .from('topics')
@@ -92,6 +106,7 @@ export class WeeklyPlanRepository {
           .select('blocked_weekdays, capacity_overrides, timezone')
           .eq('id', this.userId)
           .maybeSingle(),
+        this.service.from('courses').select('id, term_start_date').eq('user_id', this.userId),
       ]);
 
     if (topicsResult.error) throw dbError('load topics', topicsResult.error);
@@ -101,6 +116,7 @@ export class WeeklyPlanRepository {
     if (classResult.error) throw dbError('load class schedule', classResult.error);
     if (sessionsResult.error) throw dbError('load study sessions', sessionsResult.error);
     if (profileResult.error) throw dbError('load profile', profileResult.error);
+    if (coursesResult.error) throw dbError('load courses', coursesResult.error);
 
     // Tasks carrying a note were touched by the student, so they are never replaced.
     const { data: noted, error: notesError } = await this.service
@@ -224,6 +240,9 @@ export class WeeklyPlanRepository {
       courseClassDays,
       capacity,
       commitments,
+      termStartByCourse: resolveTermStarts(
+        coursesResult.data.map((course) => ({ id: course.id, termStartDate: course.term_start_date })),
+      ),
       topics: topicsResult.data.map((t) => ({
         id: t.id,
         title: t.title,

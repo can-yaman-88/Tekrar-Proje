@@ -1,5 +1,4 @@
 import { buildCramPlan, type CramTopic } from '../cram-plan';
-import { buildExamReviews } from '../exam-retro';
 
 const topic = (over: Partial<CramTopic> & { id: string; title: string }): CramTopic => ({
   easeFactor: 2.5,
@@ -79,28 +78,5 @@ describe('buildCramPlan', () => {
 
     expect(plan.droppedSteps).toBeGreaterThan(0);
     expect(plan.notes.join(' ')).toContain('sığmadı');
-  });
-});
-
-describe('buildExamReviews', () => {
-  const base = [{ id: 'a', easeFactor: 2.5, intervalDays: 6, repetitions: 2 }];
-
-  it('kötü geçen sınav konuyu başa döndürür', () => {
-    const [review] = buildExamReviews(base, 1, [], '2026-09-27');
-    expect(review?.repetitions).toBe(0);
-    expect(review?.interval_days).toBe(1);
-    expect(review?.next_review_on).toBe('2026-09-28');
-  });
-
-  it('iyi geçen sınav aralığı uzatır', () => {
-    const [review] = buildExamReviews(base, 5, [], '2026-09-27');
-    expect(review?.repetitions).toBe(3);
-    expect(review?.interval_days).toBe(15);
-  });
-
-  it('işaretlenen konu sınav iyi geçse de tekrara döner', () => {
-    const [review] = buildExamReviews(base, 5, ['a'], '2026-09-27');
-    expect(review?.interval_days).toBe(1);
-    expect(review?.ease_factor).toBeLessThan(2.5);
   });
 });

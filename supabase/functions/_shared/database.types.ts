@@ -9,6 +9,50 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      app_error_reports: {
+        Row: {
+          app_version: string | null
+          created_at: string
+          detail: Json | null
+          id: string
+          kind: string
+          message: string
+          platform: string | null
+          source: string
+          user_id: string | null
+        }
+        Insert: {
+          app_version?: string | null
+          created_at?: string
+          detail?: Json | null
+          id?: string
+          kind: string
+          message: string
+          platform?: string | null
+          source: string
+          user_id?: string | null
+        }
+        Update: {
+          app_version?: string | null
+          created_at?: string
+          detail?: Json | null
+          id?: string
+          kind?: string
+          message?: string
+          platform?: string | null
+          source?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_error_reports_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_sessions: {
         Row: {
           course_id: string
@@ -561,6 +605,8 @@ export type Database = {
           llm_key_hint: string | null
           llm_key_set_at: string | null
           llm_model: string | null
+          review_push_hour: number | null
+          review_push_sent_on: string | null
           timezone: string
           updated_at: string
         }
@@ -574,6 +620,8 @@ export type Database = {
           llm_key_hint?: string | null
           llm_key_set_at?: string | null
           llm_model?: string | null
+          review_push_hour?: number | null
+          review_push_sent_on?: string | null
           timezone?: string
           updated_at?: string
         }
@@ -587,10 +635,73 @@ export type Database = {
           llm_key_hint?: string | null
           llm_key_set_at?: string | null
           llm_model?: string | null
+          review_push_hour?: number | null
+          review_push_sent_on?: string | null
           timezone?: string
           updated_at?: string
         }
         Relationships: []
+      }
+      push_tokens: {
+        Row: {
+          created_at: string
+          last_seen_at: string
+          platform: string
+          token: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          last_seen_at?: string
+          platform: string
+          token: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          last_seen_at?: string
+          platform?: string
+          token?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_tokens_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rate_limit_hits: {
+        Row: {
+          bucket: string
+          created_at: string
+          id: number
+          user_id: string
+        }
+        Insert: {
+          bucket: string
+          created_at?: string
+          id?: never
+          user_id: string
+        }
+        Update: {
+          bucket?: string
+          created_at?: string
+          id?: never
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rate_limit_hits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       syllabus_uploads: {
         Row: {
@@ -1180,9 +1291,23 @@ export type Database = {
       apply_exam_retro: {
         Args: {
           p_exam_id: string
+          p_flagged_topic_ids?: string[]
           p_note: string
           p_outcome: number
-          p_reviews: Json
+        }
+        Returns: Json
+      }
+      apply_topic_review: {
+        Args: {
+          p_attempted?: number
+          p_confidence?: number
+          p_correct?: number
+          p_on: string
+          p_quality: number
+          p_source: string
+          p_task_id?: string
+          p_topic_id: string
+          p_user_id: string
         }
         Returns: Json
       }
@@ -1209,6 +1334,15 @@ export type Database = {
         Returns: number
       }
       clear_llm_api_key: { Args: never; Returns: undefined }
+      create_due_review_tasks: {
+        Args: {
+          p_budget_minutes: number
+          p_max_topics: number
+          p_today: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       configure_weekly_plan_cron: {
         Args: { p_function_url: string; p_service_key: string }
         Returns: string
@@ -1221,6 +1355,15 @@ export type Database = {
         Args: { p_budget_minutes?: number; p_max_topics?: number; p_today: string }
         Returns: Json
       }
+      hit_rate_limit: {
+        Args: {
+          p_bucket: string
+          p_limit: number
+          p_user_id: string
+          p_window_seconds: number
+        }
+        Returns: boolean
+      }
       is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
       is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
       kick_off_weekly_plans: { Args: never; Returns: number }
@@ -1228,6 +1371,10 @@ export type Database = {
       log_topic_review: {
         Args: { p_confidence: number; p_on?: string; p_topic_id: string }
         Returns: Json
+      }
+      move_tasks: {
+        Args: { p_due_date: string; p_task_ids: string[] }
+        Returns: number
       }
       read_llm_api_key: { Args: { p_user_id: string }; Returns: string }
       recall_quality: {
@@ -1243,8 +1390,23 @@ export type Database = {
         Args: { p_daily_log_id: string; p_reviews: Json; p_user_id: string }
         Returns: number
       }
+      register_push_token: {
+        Args: { p_platform: string; p_token: string }
+        Returns: undefined
+      }
+      report_app_error: {
+        Args: {
+          p_app_version?: string
+          p_detail?: Json
+          p_kind: string
+          p_message: string
+          p_platform?: string
+        }
+        Returns: boolean
+      }
       revert_daily_checkin: { Args: { p_daily_log_id: string }; Returns: Json }
       set_llm_api_key: { Args: { p_key: string }; Returns: Json }
+      send_review_reminders: { Args: never; Returns: number }
       set_task_status: {
         Args: {
           p_confidence?: number
@@ -1254,6 +1416,7 @@ export type Database = {
         }
         Returns: Json
       }
+      skip_tasks: { Args: { p_task_ids: string[] }; Returns: number }
       sm2_next: {
         Args: {
           p_ease: number
@@ -1263,6 +1426,12 @@ export type Database = {
         }
         Returns: Record<string, unknown>
       }
+      undo_task_review: {
+        Args: { p_task_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      unregister_push_token: { Args: { p_token: string }; Returns: undefined }
+      user_today: { Args: { p_user_id: string }; Returns: string }
     }
     Enums: {
       exam_kind: "quiz" | "midterm" | "final" | "lab" | "other"

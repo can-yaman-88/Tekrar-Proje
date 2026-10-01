@@ -7,7 +7,7 @@ import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
 import { useCallback, useMemo, useState } from 'react';
 import { buildCramPlan, CRAM_WINDOW_DAYS, MASTERY_LABEL, type CramPlan } from '../domain/cram-plan';
-import { buildExamReviews, EXAM_OUTCOME_LABEL, type ExamOutcome } from '../domain/exam-retro';
+import { EXAM_OUTCOME_LABEL, type ExamOutcome } from '../domain/exam-retro';
 
 export interface ReadinessRow {
   id: string;
@@ -122,9 +122,8 @@ export function useExamModeScreen(examId: string, { capacityByWeekday }: ExamMod
 
   const onSubmitRetro = useCallback(() => {
     if (!context || outcome === null) return;
-    const reviews = buildExamReviews(context.topics, outcome, flagged, today);
     applyRetro.mutate(
-      { examId: context.exam.id, outcome, note: note.trim() || null, reviews },
+      { examId: context.exam.id, outcome, note: note.trim() || null, flaggedTopicIds: flagged },
       {
         onSuccess: (result) => {
           refreshTasks();
@@ -138,7 +137,7 @@ export function useExamModeScreen(examId: string, { capacityByWeekday }: ExamMod
         onError: (error) => showToast(describeError(error).title, 'danger'),
       },
     );
-  }, [applyRetro, context, flagged, note, outcome, refreshTasks, today]);
+  }, [applyRetro, context, flagged, note, outcome, refreshTasks]);
 
   return {
     isLoading: query.isPending && context === null,

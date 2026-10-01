@@ -1,5 +1,6 @@
 import { useCourse, useDeleteCourse } from '@entities/course';
 import { useExamEditor } from '@features/exam-edit';
+import { useTermWeek } from '@features/term-week';
 import { EXAM_KIND_LABEL, useCourseExams } from '@entities/exam';
 import {
   isWeak,
@@ -16,7 +17,7 @@ import { showToast } from '@shared/lib/toast';
 import { useRouter } from 'expo-router';
 import { useMemo } from 'react';
 
-const toRowModel = (topic: Topic, today: string): TopicRowModel => {
+const toRowModel = (topic: Topic, today: string, currentWeek: number | null): TopicRowModel => {
   const mastery = masteryOf(topic);
   const stats: string[] = [];
   if (topic.solvedProblems > 0) stats.push(`${topic.solvedProblems} problem`);
@@ -33,7 +34,12 @@ const toRowModel = (topic: Topic, today: string): TopicRowModel => {
   return {
     id: topic.id,
     title: topic.title,
-    weekLabel: topic.weekNumber === null ? null : `${topic.weekNumber}. hafta`,
+    weekLabel:
+      topic.weekNumber === null
+        ? null
+        : currentWeek !== null && topic.weekNumber > currentWeek && topic.openTasks === 0 && topic.nextReviewOn === null
+          ? `${topic.weekNumber}. hafta · sırası gelmedi`
+          : `${topic.weekNumber}. hafta`,
     mastery,
     masteryLabel: MASTERY_LABEL[mastery],
     reviewLabel,
@@ -53,6 +59,8 @@ export function useCourseDetailScreen(courseId: string) {
   const advancedMaterial = useSetAdvancedMaterial(courseId);
   const deleteCourse = useDeleteCourse();
   const examEditor = useExamEditor(courseId);
+  const term = useTermWeek(courseId);
+  const currentWeek = term.currentWeek;
 
   const queries = [courseQuery, topicsQuery, examsQuery];
   const failed = queries.find((q) => q.isError && q.data === undefined);
@@ -71,8 +79,8 @@ export function useCourseDetailScreen(courseId: string) {
         { label: 'açık görev', value: topics.reduce((sum, t) => sum + t.openTasks, 0) },
         { label: 'çözülen problem', value: topics.reduce((sum, t) => sum + t.solvedProblems, 0) },
       ],
-      weakTopics: topics.filter(isWeak).map((t) => toRowModel(t, today)),
-      topics: topics.map((t) => toRowModel(t, today)),
+      weakTopics: topics.filter(isWeak).map((t) => toRowModel(t, today, currentWeek)),
+      topics: topics.map((t) => toRowModel(t, today, currentWeek)),
       exams: exams.map((exam) => ({
         id: exam.id,
         title: exam.title,
@@ -82,7 +90,7 @@ export function useCourseDetailScreen(courseId: string) {
         isPast: exam.examDate < today,
       })),
     };
-  }, [courseQuery.data, topicsQuery.data, examsQuery.data, today]);
+  }, [courseQuery.data, topicsQuery.data, examsQuery.data, today, currentWeek]);
 
   return {
     isLoading: queries.some((q) => q.isPending && q.data === undefined),
@@ -90,6 +98,7 @@ export function useCourseDetailScreen(courseId: string) {
     retry: () => queries.forEach((q) => void q.refetch()),
     view,
     examEditor,
+    term,
     onOpenExam: (examId: string) => router.push(`/exam/${examId}`),
     onOpenTopic: (topicId: string) => router.push(`/topic/${topicId}`),
     onToggleAdvanced: (topicId: string, hasAdvancedMaterial: boolean) =>

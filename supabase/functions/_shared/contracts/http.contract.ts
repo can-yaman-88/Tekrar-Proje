@@ -9,6 +9,7 @@ export const ApiErrorCodeSchema = z.enum([
   'method_not_allowed',
   'llm_unavailable',
   'llm_invalid_output',
+  'rate_limited',
   'internal',
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCodeSchema>;

@@ -27,6 +27,7 @@ const KIND_BY_API_CODE: Record<ApiErrorCode, AppErrorKind> = {
   method_not_allowed: 'server',
   llm_unavailable: 'server',
   llm_invalid_output: 'validation',
+  rate_limited: 'rate_limited',
   internal: 'server',
 };
 

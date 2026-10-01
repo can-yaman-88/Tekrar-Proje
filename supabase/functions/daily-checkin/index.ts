@@ -15,6 +15,7 @@ import { HttpError, LlmError } from '../_shared/errors.ts';
 import { createHandler, jsonResponse, readJson } from '../_shared/http.ts';
 import { createLlmProvider } from '../_shared/llm/index.ts';
 import { readUserLlmSettings } from '../_shared/user-model.ts';
+import { enforceRateLimit } from '../_shared/rate-limit.ts';
 import { authenticate, createServiceClient } from '../_shared/supabase.ts';
 import { prepareAttachments } from './attachments.ts';
 import { planCheckinEffects } from './planner.ts';
@@ -22,11 +23,14 @@ import { buildUserPrompt, SYSTEM_PROMPT } from './prompt.ts';
 import { CheckinRepository } from './repository.ts';
 
 Deno.serve(
-  createHandler('daily-checkin', async (req, { log }) => {
+  createHandler('daily-checkin', async (req, { log, identify }) => {
     const env = getEnv();
     const service = createServiceClient(env);
     const { userId, userClient } = await authenticate(req, env, service);
+    identify(userId);
     const { dailyLogId } = DailyCheckinRequestSchema.parse(await readJson(req));
+    // Before the claim: a refused call leaves the log pending, ready to retry.
+    await enforceRateLimit(service, userId, 'checkin');
 
     const repo = new CheckinRepository(service, userClient, userId);
     const claimed = await repo.claim(dailyLogId);

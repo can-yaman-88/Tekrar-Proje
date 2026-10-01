@@ -18,6 +18,7 @@ import { errorMessage, HttpError } from '../_shared/errors.ts';
 import { createHandler, jsonResponse, readJson } from '../_shared/http.ts';
 import { createLlmProvider } from '../_shared/llm/index.ts';
 import { readUserLlmSettings, type UserLlmSettings } from '../_shared/user-model.ts';
+import { enforceRateLimit } from '../_shared/rate-limit.ts';
 import { authenticate, createServiceClient } from '../_shared/supabase.ts';
 import { fallbackCopy, planWeek, type PlanSlot } from './planner.ts';
 import { buildUserPrompt, SYSTEM_PROMPT } from './prompt.ts';
@@ -30,7 +31,7 @@ function weekStartOf(date: IsoDate): IsoDate {
 }
 
 Deno.serve(
-  createHandler('generate-weekly-plan', async (req, { log }) => {
+  createHandler('generate-weekly-plan', async (req, { log, identify }) => {
     const env = getEnv();
     const service = createServiceClient(env);
     const body = WeeklyPlanRequestSchema.parse(await readJson(req));
@@ -40,9 +41,12 @@ Deno.serve(
     const isCron = token === env.SUPABASE_SERVICE_ROLE_KEY;
     if (isCron && !body.userId) throw new HttpError('bad_request', 'userId is required for service-role calls.');
     const userId = isCron && body.userId ? body.userId : (await authenticate(req, env, service)).userId;
+    identify(userId);
+    // The Monday job is the server's own; only a student's taps count.
+    if (!isCron) await enforceRateLimit(service, userId, 'weekly_plan');
 
-    const weekStart = weekStartOf(body.weekStart ?? new Date().toISOString().slice(0, 10));
     const repo = new WeeklyPlanRepository(service, userId);
+    const weekStart = weekStartOf(body.weekStart ?? (await repo.localToday()));
     const context = await repo.loadContext(weekStart, addDays(weekStart, 6));
 
     const { weekEnd, slots, notes } = planWeek({
@@ -55,6 +59,7 @@ Deno.serve(
       capacityByWeekday: context.capacity.minutesByWeekday,
       capacitySources: Object.fromEntries(context.capacity.days.map((day) => [day.weekday, day.source])),
       blockedWeekdays: context.capacity.days.filter((day) => day.source === 'blocked').map((day) => day.weekday),
+      termStartByCourse: context.termStartByCourse,
     });
     log.info('planned', { userId, weekStart, slots: slots.length, topics: context.topics.length });
 

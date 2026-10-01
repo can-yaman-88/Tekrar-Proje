@@ -320,3 +320,39 @@ Deno.test('öğrenilmiş bütçeden ders saati ikinci kez düşülmez', () => {
   // Tahmini bütçede 6 saatlik ders günü tabana iner, iş başka güne kayar.
   assertEquals(plan('default').slots[0]?.dueDate === MONDAY, false);
 });
+
+Deno.test('henüz işlenmemiş haftanın konusu plana girmez, işlenmiş olan girer', () => {
+  // Dönem 14 Eylül'de başladı: 21 Eylül haftası 2. hafta.
+  const { slots, notes } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('w2', { weekNumber: 2 }), topic('w5', { weekNumber: 5 })],
+    exams: [],
+    termStartByCourse: { c1: '2026-09-14' },
+    dailyCapacityMinutes: 400,
+  });
+  assertEquals([...new Set(slots.map((s) => s.topicId))], ['w2']);
+  assertEquals(notes.some((note) => note.includes('henüz işlenmediği')), true);
+});
+
+Deno.test('ileri haftanın konusuna öğrenci zaten başladıysa geri tutulmaz', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('w5', { weekNumber: 5, completedSteps: ['concept_note'] })],
+    exams: [],
+    termStartByCourse: { c1: '2026-09-14' },
+    dailyCapacityMinutes: 400,
+  });
+  assertEquals(slots.length > 0, true);
+});
+
+Deno.test('bu hafta işlenecek konu dersin ilk gününden önceye konmaz', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('w2', { weekNumber: 2 })],
+    exams: [],
+    courseClassDays: { c1: [3] }, // çarşamba
+    termStartByCourse: { c1: '2026-09-14' },
+    dailyCapacityMinutes: 400,
+  });
+  assertEquals(slots.every((s) => s.dueDate >= WEDNESDAY), true);
+});

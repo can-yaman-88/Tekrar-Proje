@@ -12,6 +12,7 @@ import { getEnv } from '../_shared/env.ts';
 import { errorMessage } from '../_shared/errors.ts';
 import { createHandler, jsonResponse, readJson } from '../_shared/http.ts';
 import { createLlmProvider } from '../_shared/llm/index.ts';
+import { enforceRateLimit } from '../_shared/rate-limit.ts';
 import { authenticate, createServiceClient } from '../_shared/supabase.ts';
 import { readUserLlmSettings } from '../_shared/user-model.ts';
 import { listModels } from './catalog.ts';
@@ -48,11 +49,13 @@ const ProbeSchema = z.object({
 });
 
 Deno.serve(
-  createHandler('llm-models', async (req, { log }) => {
+  createHandler('llm-models', async (req, { log, identify }) => {
     const env = getEnv();
     const service = createServiceClient(env);
     const { userId } = await authenticate(req, env, service);
+    identify(userId);
     const { test } = LlmModelsRequestSchema.parse(await readJson(req));
+    await enforceRateLimit(service, userId, test ? 'llm_test' : 'llm_models');
 
     // The list must reflect the key that will pay for the calls, so the
     // student's own key is used for the catalogue too.

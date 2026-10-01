@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(74);
+select plan(90);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -182,13 +182,13 @@ select throws_ok(
   'cram plan refuses an exam the caller does not own'
 );
 select throws_ok(
-  $$select public.apply_exam_retro('11111111-0000-4000-8000-00000000000a', 3::smallint, null, '[]'::jsonb)$$,
+  $$select public.apply_exam_retro('11111111-0000-4000-8000-00000000000a', 3::smallint, null, '{}'::uuid[])$$,
   'P0002',
   null,
   'exam retro refuses an exam the caller does not own'
 );
 select throws_ok(
-  $$select public.apply_exam_retro('11111111-0000-4000-8000-00000000000a', 9::smallint, null, '[]'::jsonb)$$,
+  $$select public.apply_exam_retro('11111111-0000-4000-8000-00000000000a', 9::smallint, null, '{}'::uuid[])$$,
   '22023',
   null,
   'exam retro rejects an out-of-range outcome'
@@ -607,6 +607,123 @@ select is(
   (select (public.ensure_review_tasks(current_date) ->> 'topics')::int),
   0,
   'asking again the same day creates nothing more'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 13. One door for status, limits, error reports and push tokens.
+-- ---------------------------------------------------------------------------
+insert into public.tasks (id, user_id, topic_id, type, title, due_date, status) values
+  ('e0000000-0000-4000-8000-0000000000f1', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-0000000000a2', 'quiz', 'A geciken', current_date - 5, 'rescheduled'),
+  ('e0000000-0000-4000-8000-0000000000f2', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-0000000000a2', 'quiz', 'A atlanacak', current_date - 5, 'pending');
+insert into public.exams (id, user_id, course_id, kind, title, exam_date) values
+  ('11111111-0000-4000-8000-0000000000a2', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'midterm', 'A vizesi', current_date - 1);
+insert into public.topics (id, user_id, course_id, title, ease_factor, interval_days, repetitions) values
+  ('d0000000-0000-4000-8000-0000000000a3', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'A sınav konusu 1', 2.5, 6, 2),
+  ('d0000000-0000-4000-8000-0000000000a4', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'A sınav konusu 2', 2.5, 6, 2);
+insert into public.exam_topics (exam_id, topic_id, user_id) values
+  ('11111111-0000-4000-8000-0000000000a2', 'd0000000-0000-4000-8000-0000000000a3', 'aaaaaaaa-0000-4000-8000-000000000001'),
+  ('11111111-0000-4000-8000-0000000000a2', 'd0000000-0000-4000-8000-0000000000a4', 'aaaaaaaa-0000-4000-8000-000000000001');
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+
+select throws_ok(
+  $$update public.tasks set status = 'completed', completed_at = now()
+     where id = 'e0000000-0000-4000-8000-0000000000f2'$$,
+  '42501',
+  null,
+  'the app cannot flip a status around the review schedule'
+);
+select throws_ok(
+  $$insert into public.tasks (user_id, topic_id, type, title, due_date, status, completed_at)
+    values ('aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-0000000000a2',
+            'quiz', 'hazır bitmiş', current_date, 'completed', now())$$,
+  '42501',
+  null,
+  'the app cannot create work that is already finished'
+);
+select lives_ok(
+  $$update public.tasks set title = 'A atlanacak iş' where id = 'e0000000-0000-4000-8000-0000000000f2'$$,
+  'everything else about a task stays editable'
+);
+select is(
+  public.move_tasks(array['e0000000-0000-4000-8000-0000000000f1'::uuid], current_date + 1),
+  1,
+  'overdue work can be moved to another day'
+);
+select is(
+  (select status::text from public.tasks where id = 'e0000000-0000-4000-8000-0000000000f1'),
+  'pending',
+  'moving work the planner had set aside puts it back on the board'
+);
+select is(
+  public.skip_tasks(array['e0000000-0000-4000-8000-0000000000f2'::uuid, 'e0000000-0000-4000-8000-00000000000b'::uuid]),
+  1,
+  'skipping touches only the caller''s own tasks'
+);
+select lives_ok(
+  $$select public.apply_exam_retro('11111111-0000-4000-8000-0000000000a2', 5::smallint, 'iyi',
+      array['d0000000-0000-4000-8000-0000000000a4'::uuid])$$,
+  'the exam retro takes only what the student said'
+);
+select is(
+  (select string_agg(repetitions || '/' || interval_days, ' ' order by title)
+     from public.topics where id in ('d0000000-0000-4000-8000-0000000000a3', 'd0000000-0000-4000-8000-0000000000a4')),
+  '3/15 0/1',
+  'the server computes the schedule: a good exam stretches it, a flagged topic resets'
+);
+select is(
+  (select count(*)::int from public.topic_review_events where exam_id = '11111111-0000-4000-8000-0000000000a2'),
+  2,
+  'the exam is written into each covered topic''s history'
+);
+select is(
+  public.report_app_error('render', 'Ekran çöktü', '{"screen":"notebook"}'::jsonb, '1.0.0', 'android'),
+  true,
+  'the app can report an error'
+);
+select is(
+  (select count(*)::int from public.app_error_reports),
+  0,
+  'but cannot read any report back'
+);
+select throws_ok(
+  $$select public.hit_rate_limit('aaaaaaaa-0000-4000-8000-000000000001', 'checkin', 1, 60)$$,
+  '42501',
+  null,
+  'rate limits are kept by the server alone'
+);
+select throws_ok(
+  $$select public.register_push_token('herhangi bir metin', 'android')$$,
+  '22023',
+  null,
+  'only an Expo push token is accepted'
+);
+select lives_ok(
+  $$select public.register_push_token('ExponentPushToken[AbCdEf123456_-xyz]', 'android')$$,
+  'a device registers its push token'
+);
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select is(
+  (select count(*)::int from public.push_tokens),
+  0,
+  'B cannot see A''s devices'
+);
+reset role;
+
+set local role service_role;
+select is(
+  (select array_agg(public.hit_rate_limit('aaaaaaaa-0000-4000-8000-000000000001', 'probe', 2, 3600)
+                    order by n)::text
+     from generate_series(1, 3) n),
+  '{t,t,f}',
+  'the third call inside the window is refused'
 );
 reset role;
 

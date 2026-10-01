@@ -8,6 +8,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   conflict: 409,
   llm_invalid_output: 422,
   llm_unavailable: 503,
+  rate_limited: 429,
   internal: 500,
 };
 

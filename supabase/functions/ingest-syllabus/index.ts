@@ -15,6 +15,7 @@ import { HttpError, LlmError } from '../_shared/errors.ts';
 import { createHandler, jsonResponse, readJson } from '../_shared/http.ts';
 import { createLlmProvider } from '../_shared/llm/index.ts';
 import { readUserLlmSettings } from '../_shared/user-model.ts';
+import { enforceRateLimit } from '../_shared/rate-limit.ts';
 import { authenticate, createServiceClient } from '../_shared/supabase.ts';
 import { mapSyllabus } from './mapper.ts';
 import { extractPdfText } from './pdf.ts';
@@ -22,11 +23,13 @@ import { buildUserPrompt, SYSTEM_PROMPT } from './prompt.ts';
 import { SyllabusRepository } from './repository.ts';
 
 Deno.serve(
-  createHandler('ingest-syllabus', async (req, { log }) => {
+  createHandler('ingest-syllabus', async (req, { log, identify }) => {
     const env = getEnv();
     const service = createServiceClient(env);
     const { userId, userClient } = await authenticate(req, env, service);
+    identify(userId);
     const { uploadId } = SyllabusIngestRequestSchema.parse(await readJson(req));
+    await enforceRateLimit(service, userId, 'syllabus');
 
     const repo = new SyllabusRepository(service, userClient, userId);
     const upload = await repo.claim(uploadId);

@@ -2,6 +2,12 @@ import { BaseRepository } from '@shared/api/repository';
 import type { CourseRef } from '../domain/course';
 import { toCourseRef } from './course.mapper';
 
+/** When a course's week 1 began; null when neither the syllabus nor the student said. */
+export interface CourseTerm {
+  id: string;
+  termStartDate: string | null;
+}
+
 export interface CourseWithStats extends CourseRef {
   topicCount: number;
   nextExam: { title: string; examDate: string } | null;
@@ -22,6 +28,21 @@ export class CourseRepository extends BaseRepository {
       this.db.from('courses').select('id, name, code, color_hex').eq('id', courseId).single(),
     );
     return toCourseRef(row);
+  }
+
+  /** Every course's term start — a course without one borrows the semester's. */
+  async listTerms(): Promise<CourseTerm[]> {
+    const rows = await this.execute('courses.listTerms', this.db.from('courses').select('id, term_start_date'));
+    return rows.map((row) => ({ id: row.id, termStartDate: row.term_start_date }));
+  }
+
+  /** Sets week 1 for the given courses (one semester usually starts on one day for all). */
+  async setTermStart(courseIds: readonly string[], termStartDate: string): Promise<void> {
+    if (courseIds.length === 0) return;
+    await this.execute(
+      'courses.setTermStart',
+      this.db.from('courses').update({ term_start_date: termStartDate }).in('id', [...courseIds]).select('id'),
+    );
   }
 
   /** Courses plus the counts the Courses screen shows. */

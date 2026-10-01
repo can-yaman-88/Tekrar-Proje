@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   examModeRepository,
   type CramTaskInput,
-  type ExamTopicReview,
 } from '../data/exam-mode.repository';
 import { examKeys } from './exam.queries';
 
@@ -53,12 +52,12 @@ export function useApplyExamRetro() {
       examId,
       outcome,
       note,
-      reviews,
+      flaggedTopicIds,
     }: {
       examId: string;
       outcome: number;
       note: string | null;
-      reviews: readonly ExamTopicReview[];
-    }) => examModeRepository.applyRetro(examId, outcome, note, reviews),
+      flaggedTopicIds: readonly string[];
+    }) => examModeRepository.applyRetro(examId, outcome, note, flaggedTopicIds),
   );
 }

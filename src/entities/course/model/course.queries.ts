@@ -6,6 +6,7 @@ export const courseKeys = {
   all: ['courses'] as const,
   withStats: (today: IsoDate) => [...courseKeys.all, 'stats', today] as const,
   detail: (courseId: string) => [...courseKeys.all, 'detail', courseId] as const,
+  terms: () => [...courseKeys.all, 'terms'] as const,
 };
 
 export function useCourse(courseId: string) {
@@ -23,9 +24,25 @@ export function useCourses(today: IsoDate) {
   });
 }
 
+/** Week 1 of every course, for "bu hafta dönemin kaçıncı haftası". */
+export function useCourseTerms() {
+  return useQuery({ queryKey: courseKeys.terms(), queryFn: () => courseRepository.listTerms() });
+}
+
 export const courseMutationKeys = {
   remove: [...courseKeys.all, 'delete'] as const,
+  termStart: [...courseKeys.all, 'term-start'] as const,
 };
+
+export function useSetTermStart() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: courseMutationKeys.termStart,
+    mutationFn: ({ courseIds, termStartDate }: { courseIds: readonly string[]; termStartDate: string }) =>
+      courseRepository.setTermStart(courseIds, termStartDate),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: courseKeys.all }),
+  });
+}
 
 export function useDeleteCourse() {
   const queryClient = useQueryClient();

@@ -11,6 +11,7 @@
 import type { ExamKind, IsoDate, StudyStep, TaskType } from '../_shared/contracts/enums.contract.ts';
 import { type CapacitySource, DEFAULT_DAILY_CAPACITY, planningBudget } from '../_shared/domain/capacity.ts';
 import { addDays, diffInDays } from '../_shared/domain/dates.ts';
+import { isTaughtBy, teachingWeekOf } from '../_shared/domain/term.ts';
 import { planDeadlineWork } from '../_shared/domain/workload.ts';
 import {
   effortOf,
@@ -101,6 +102,11 @@ export interface PlanInput {
   capacitySources?: Readonly<Record<number, CapacitySource>>;
   /** Days the student never studies on: no work lands there, whatever else says so. */
   blockedWeekdays?: readonly number[];
+  /**
+   * The Monday-of-week-1 for each course (its own, or the semester's). A topic
+   * whose week has not come yet is not studied: its lecture has not happened.
+   */
+  termStartByCourse?: Readonly<Record<string, IsoDate | null>>;
   /** Flat fallback for weekdays with no history. */
   dailyCapacityMinutes?: number;
 }
@@ -221,6 +227,7 @@ export function planWeek({
   capacityByWeekday,
   capacitySources,
   blockedWeekdays = [],
+  termStartByCourse = {},
   dailyCapacityMinutes,
 }: PlanInput): PlanResult {
   const fallbackCapacity = dailyCapacityMinutes ?? DEFAULT_DAILY_CAPACITY;
@@ -230,7 +237,21 @@ export function planWeek({
   // Quizzes and labs never enter planning.
   const plannedExams = exams.filter((exam) => PLANNED_EXAM_KINDS.has(exam.kind));
 
+  // A topic not taught yet has nothing to write up. Work already started on it
+  // (a step done, a step open, a review scheduled) is the student's own signal
+  // that it has been covered, and is never held back.
+  const untouched = (topic: PlanTopic) =>
+    topic.completedSteps.length === 0 && topic.openSteps.length === 0 && topic.nextReviewOn === null;
+  const notYetTaught = topics.filter(
+    (topic) => untouched(topic) && !isTaughtBy(topic.weekNumber, termStartByCourse[topic.courseId] ?? null, weekEnd),
+  );
+  const heldBack = new Set(notYetTaught.map((topic) => topic.id));
+  if (notYetTaught.length > 0) {
+    notes.push(`${notYetTaught.length} konu henüz işlenmediği için plana alınmadı; ders haftası gelince girecek.`);
+  }
+
   const planned = topics
+    .filter((topic) => !heldBack.has(topic.id))
     .map((topic) => planTopic(topic, plannedExams, weekStart, weekEnd))
     .filter((plan): plan is TopicPlan => plan !== null)
     .sort((a, b) => b.score - a.score || a.topic.title.localeCompare(b.topic.title))
@@ -319,10 +340,22 @@ export function planWeek({
 
     // A review is a recall test after a gap: doing it before the day it is due
     // only shortens the gap. It waits for that day (an overdue one goes first).
+    // A topic taught this very week is written up after its lecture: on the
+    // course's first class day of the week, not on the Monday before it.
+    const termStart = termStartByCourse[plan.topic.courseId] ?? null;
+    const taughtThisWeek =
+      !plan.isReview &&
+      untouched(plan.topic) &&
+      plan.topic.weekNumber !== null &&
+      termStart !== null &&
+      plan.topic.weekNumber === teachingWeekOf(termStart, weekStart);
+    const firstClassDay = preferred.length > 0 ? days.indexOf(preferred[0] as IsoDate) : 0;
     const notBefore =
       plan.isReview && plan.topic.nextReviewOn !== null && plan.topic.nextReviewOn > weekStart
         ? days.findIndex((day) => day >= (plan.topic.nextReviewOn as IsoDate))
-        : 0;
+        : taughtThisWeek
+          ? firstClassDay
+          : 0;
     if (notBefore < 0) continue; // its day is closed or an exam day; the daily review job picks it up
 
     let lastIndex = -1; // steps never run backwards in time

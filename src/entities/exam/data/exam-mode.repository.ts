@@ -39,16 +39,6 @@ export interface CramTaskInput {
   due_date: IsoDate;
 }
 
-export interface ExamTopicReview {
-  topic_id: string;
-  ease_factor: number;
-  interval_days: number;
-  repetitions: number;
-  next_review_on: IsoDate;
-  /** SM-2 quality the exam was worth for this topic; kept in the review history. */
-  quality?: number;
-}
-
 export class ExamModeRepository extends BaseRepository {
   /** Everything the exam screen needs: the exam, its topics, and their state. */
   async loadContext(examId: string, today: IsoDate): Promise<ExamModeContext> {
@@ -150,11 +140,15 @@ export class ExamModeRepository extends BaseRepository {
     return { deleted: payload?.deleted ?? 0, inserted: payload?.inserted ?? 0 };
   }
 
+  /**
+   * Sends what the student said — how it went, which topics hurt. The review
+   * schedule that follows from it is worked out in the database, not here.
+   */
   async applyRetro(
     examId: string,
     outcome: number,
     note: string | null,
-    reviews: readonly ExamTopicReview[],
+    flaggedTopicIds: readonly string[],
   ): Promise<{ topicsUpdated: number; tasksClosed: number }> {
     const result = await this.execute(
       'exam_mode.applyRetro',
@@ -164,7 +158,7 @@ export class ExamModeRepository extends BaseRepository {
         // Generated RPC arg types carry no nullability; the function itself takes
         // null for "no note", which is the common case.
         p_note: note as string,
-        p_reviews: reviews as unknown as Json,
+        p_flagged_topic_ids: [...flaggedTopicIds],
       }),
     );
     const payload = result as { topics_updated?: number; tasks_closed?: number } | null;

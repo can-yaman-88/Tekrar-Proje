@@ -38,7 +38,7 @@ begin
   end if;
 
   for v_user in select id from public.profiles loop
-    perform extensions.net_http_post(
+    perform net.http_post(
       url     := v_url,
       headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || v_key),
       body    := jsonb_build_object('userId', v_user.id),

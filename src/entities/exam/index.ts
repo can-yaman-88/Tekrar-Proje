@@ -22,7 +22,6 @@ export {
   type CramTaskInput,
   type ExamModeContext,
   type ExamModeTopic,
-  type ExamTopicReview,
 } from './data/exam-mode.repository';
 export { toExamChipModel, type ExamChipModel } from './model/exam.view-model';
 export { ExamChip, ExamChipSkeleton } from './ui/ExamChip';

@@ -202,14 +202,14 @@ export class TaskRepository extends BaseRepository {
     return rows.filter((row) => !parents.has(row.id)).map(toTask);
   }
 
-  /** Closes several tasks at once: they were not done and will not be. */
+  /**
+   * Closes several tasks at once: they were not done and will not be. Status
+   * only changes through the database's own functions, so the review schedule
+   * can never be stepped around.
+   */
   async skipMany(taskIds: readonly string[]): Promise<number> {
     if (taskIds.length === 0) return 0;
-    const rows = await this.execute(
-      'tasks.skipMany',
-      this.db.from('tasks').update({ status: 'skipped' }).in('id', [...taskIds]).select('id'),
-    );
-    return rows.length;
+    return this.execute('tasks.skipMany', this.db.rpc('skip_tasks', { p_task_ids: [...taskIds] }));
   }
 
   /**
@@ -221,20 +221,10 @@ export class TaskRepository extends BaseRepository {
    */
   async moveMany(taskIds: readonly string[], dueDate: IsoDate): Promise<number> {
     if (taskIds.length === 0) return 0;
-    const rows = await this.execute(
+    return this.execute(
       'tasks.moveMany',
-      this.db.from('tasks').update({ due_date: dueDate }).in('id', [...taskIds]).select('id'),
+      this.db.rpc('move_tasks', { p_task_ids: [...taskIds], p_due_date: dueDate }),
     );
-    await this.execute(
-      'tasks.reopenRescheduled',
-      this.db
-        .from('tasks')
-        .update({ status: 'pending' })
-        .in('id', [...taskIds])
-        .eq('status', 'rescheduled')
-        .select('id'),
-    );
-    return rows.length;
   }
 
   async update(taskId: string, patch: TaskPatch): Promise<Task> {
