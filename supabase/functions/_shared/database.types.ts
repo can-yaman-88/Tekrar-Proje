@@ -247,7 +247,7 @@ export type Database = {
           daily_log_id: string
           id: string
           reason: string | null
-          snapshot: NonNullable<Json>
+          snapshot: Json
           task_id: string
           user_id: string
         }
@@ -256,7 +256,7 @@ export type Database = {
           daily_log_id: string
           id?: string
           reason?: string | null
-          snapshot: NonNullable<Json>
+          snapshot: Json
           task_id: string
           user_id: string
         }
@@ -265,7 +265,7 @@ export type Database = {
           daily_log_id?: string
           id?: string
           reason?: string | null
-          snapshot?: NonNullable<Json>
+          snapshot?: Json
           task_id?: string
           user_id?: string
         }
@@ -598,7 +598,7 @@ export type Database = {
         Row: {
           auto_weekly_plan: boolean
           blocked_weekdays: number[]
-          capacity_overrides: NonNullable<Json>
+          capacity_overrides: Json
           created_at: string
           display_name: string | null
           id: string
@@ -613,7 +613,7 @@ export type Database = {
         Insert: {
           auto_weekly_plan?: boolean
           blocked_weekdays?: number[]
-          capacity_overrides?: NonNullable<Json>
+          capacity_overrides?: Json
           created_at?: string
           display_name?: string | null
           id: string
@@ -628,7 +628,7 @@ export type Database = {
         Update: {
           auto_weekly_plan?: boolean
           blocked_weekdays?: number[]
-          capacity_overrides?: NonNullable<Json>
+          capacity_overrides?: Json
           created_at?: string
           display_name?: string | null
           id?: string
@@ -1333,10 +1333,7 @@ export type Database = {
         Args: { p_completions: Json; p_daily_log_id: string; p_user_id: string }
         Returns: number
       }
-      clear_llm_api_key: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
+      clear_llm_api_key: { Args: never; Returns: undefined }
       configure_weekly_plan_cron: {
         Args: { p_function_url: string; p_service_key: string }
         Returns: string
@@ -1373,10 +1370,7 @@ export type Database = {
       }
       is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
       is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
-      kick_off_weekly_plans: {
-        Args: Record<PropertyKey, never>
-        Returns: number
-      }
+      kick_off_weekly_plans: { Args: never; Returns: number }
       llm_key_secret_name: { Args: { p_user_id: string }; Returns: string }
       log_topic_review: {
         Args: { p_confidence: number; p_on?: string; p_topic_id: string }
@@ -1415,10 +1409,7 @@ export type Database = {
         Returns: boolean
       }
       revert_daily_checkin: { Args: { p_daily_log_id: string }; Returns: Json }
-      send_review_reminders: {
-        Args: Record<PropertyKey, never>
-        Returns: number
-      }
+      send_review_reminders: { Args: never; Returns: number }
       set_llm_api_key: { Args: { p_key: string }; Returns: Json }
       set_task_status: {
         Args: {
