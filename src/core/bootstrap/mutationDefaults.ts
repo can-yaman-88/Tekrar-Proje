@@ -1,6 +1,22 @@
+import {
+  PROFILE_SCOPE,
+  profileMutationKeys,
+  runSetAutoWeeklyPlan,
+  runSetBlockedWeekdays,
+  runSetCapacityOverrides,
+} from '@entities/profile';
 import { taskMutationKeys, taskRepository, type TaskPatch, type TaskStatus } from '@entities/task';
 import { taskNoteMutationKeys, taskNoteRepository } from '@entities/task-note';
 import { taskSessionMutationKeys, taskSessionRepository } from '@entities/task-session';
+import {
+  runAddMistake,
+  runDeleteMistake,
+  runReopenMistake,
+  runResolveMistake,
+  runUpdateMistake,
+  TOPIC_MISTAKE_SCOPE,
+  topicMistakeMutationKeys,
+} from '@entities/topic-mistake';
 import { runToggle } from '@features/task-toggle-status';
 import { queryClient } from '@shared/api/query';
 
@@ -59,5 +75,20 @@ export function registerMutationDefaults(): void {
   });
   queryClient.setMutationDefaults(taskSessionMutationKeys.log, {
     mutationFn: ({ taskId, minutes }: LogSessionVariables) => taskSessionRepository.logManual(taskId, minutes),
+  });
+
+  // The mistake book and the settings each drain as one ordered queue.
+  const book = { scope: TOPIC_MISTAKE_SCOPE };
+  queryClient.setMutationDefaults(topicMistakeMutationKeys.add, { ...book, mutationFn: runAddMistake });
+  queryClient.setMutationDefaults(topicMistakeMutationKeys.update, { ...book, mutationFn: runUpdateMistake });
+  queryClient.setMutationDefaults(topicMistakeMutationKeys.resolve, { ...book, mutationFn: runResolveMistake });
+  queryClient.setMutationDefaults(topicMistakeMutationKeys.reopen, { ...book, mutationFn: runReopenMistake });
+  queryClient.setMutationDefaults(topicMistakeMutationKeys.remove, { ...book, mutationFn: runDeleteMistake });
+  const profile = { scope: PROFILE_SCOPE };
+  queryClient.setMutationDefaults(profileMutationKeys.autoWeeklyPlan, { ...profile, mutationFn: runSetAutoWeeklyPlan });
+  queryClient.setMutationDefaults(profileMutationKeys.blockedWeekdays, { ...profile, mutationFn: runSetBlockedWeekdays });
+  queryClient.setMutationDefaults(profileMutationKeys.capacityOverrides, {
+    ...profile,
+    mutationFn: runSetCapacityOverrides,
   });
 }

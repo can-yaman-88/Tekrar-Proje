@@ -10,7 +10,14 @@ export {
   type TopicMistakeWithContext,
 } from './domain/topic-mistake';
 export {
+  runAddMistake,
+  runDeleteMistake,
+  runReopenMistake,
+  runResolveMistake,
+  runUpdateMistake,
+  TOPIC_MISTAKE_SCOPE,
   topicMistakeKeys,
+  topicMistakeMutationKeys,
   useAddMistake,
   useDeleteMistake,
   useMistakeBook,
@@ -20,5 +27,8 @@ export {
   useTopicMistakes,
   useTopicMistakesFor,
   useUpdateMistake,
+  type AddMistakeVariables,
+  type ResolveMistakeVariables,
+  type UpdateMistakeVariables,
 } from './model/topic-mistake.queries';
 export { MistakeList } from './ui/MistakeList';

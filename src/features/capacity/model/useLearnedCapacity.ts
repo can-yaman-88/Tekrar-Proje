@@ -12,6 +12,7 @@ import { useSessionsSince } from '@entities/task-session';
 import { addDays, formatMinutes, formatShortDate, localDateOf, useToday } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
+import { onlineManager } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 
 export type CapacityMode = 'auto' | 'manual' | 'closed';
@@ -148,38 +149,45 @@ export function useLearnedCapacity() {
     };
   }, [blocked, finished.data, overrides, schedule.data, sessions.data, today]);
 
+  const { mutate: mutateBlocked } = setBlocked;
+  const { mutate: mutateOverrides } = setOverrides;
+  /**
+   * Shows the new number at once; offline it waits in the queue (blocked days
+   * before overrides, in the order they were made), and a refusal from the
+   * server puts the old number back.
+   */
   const save = useCallback(
-    async (weekday: Weekday, mode: CapacityMode, minutes: number | null) => {
+    (weekday: Weekday, mode: CapacityMode, minutes: number | null) => {
       const nextBlocked =
         mode === 'closed' ? [...new Set([...blocked, weekday])] : blocked.filter((day) => day !== weekday);
       const nextOverrides: Record<number, number> = { ...overrides };
       if (mode === 'manual' && minutes !== null) nextOverrides[weekday] = minutes;
       if (mode === 'auto') delete nextOverrides[weekday];
 
-      try {
-        if (nextBlocked.length !== blocked.length) await setBlocked.mutateAsync(nextBlocked);
-        if (JSON.stringify(nextOverrides) !== JSON.stringify(overrides)) await setOverrides.mutateAsync(nextOverrides);
-        const label = WEEKDAY_LABEL[weekday];
-        showToast(
-          mode === 'closed'
-            ? `${label} kapatıldı; plan o güne iş koymayacak.`
-            : mode === 'manual'
-              ? `${label} için ${formatMinutes(minutes ?? 0)} ayarlandı.`
-              : `${label} yeniden otomatik.`,
-          'success',
-        );
-        setEditing(null);
-      } catch (error) {
-        showToast(describeError(error).message, 'danger');
-      }
+      const onError = (error: Error) => showToast(`${describeError(error).message} Ayar geri alındı.`, 'danger');
+      if (nextBlocked.length !== blocked.length) mutateBlocked(nextBlocked, { onError });
+      if (JSON.stringify(nextOverrides) !== JSON.stringify(overrides)) mutateOverrides(nextOverrides, { onError });
+
+      const label = WEEKDAY_LABEL[weekday];
+      const queued = onlineManager.isOnline() ? '' : ' Bağlantı gelince kaydedilecek.';
+      showToast(
+        (mode === 'closed'
+          ? `${label} kapatıldı; plan o güne iş koymayacak.`
+          : mode === 'manual'
+            ? `${label} için ${formatMinutes(minutes ?? 0)} ayarlandı.`
+            : `${label} yeniden otomatik.`) + queued,
+        'success',
+      );
+      setEditing(null);
     },
-    [blocked, overrides, setBlocked, setOverrides],
+    [blocked, overrides, mutateBlocked, mutateOverrides],
   );
 
   return {
     ...view,
     isLoading: finished.isPending || profile.isPending,
-    isSaving: setBlocked.isPending || setOverrides.isPending,
+    // Waiting for the network is not saving: the card already shows the change.
+    isSaving: (setBlocked.isPending && !setBlocked.isPaused) || (setOverrides.isPending && !setOverrides.isPaused),
     editing,
     onEdit: (weekday: Weekday) => setEditing((current) => (current === weekday ? null : weekday)),
     onCloseEditor: () => setEditing(null),

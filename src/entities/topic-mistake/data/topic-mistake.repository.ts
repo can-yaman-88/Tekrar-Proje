@@ -1,5 +1,5 @@
 import { BaseRepository } from '@shared/api/repository';
-import { AppError } from '@shared/lib/errors';
+import { AppError, toAppError } from '@shared/lib/errors';
 import { normalizeMistake, type TopicMistake, type TopicMistakeWithContext } from '../domain/topic-mistake';
 
 const MISTAKE_SELECT = 'id, topic_id, body, concept, task_id, source_daily_log_id, created_at, resolved_at';
@@ -79,13 +79,16 @@ export class TopicMistakeRepository extends BaseRepository {
     return rows.map(toMistake);
   }
 
-  /** "Bunu artık biliyorum" — the entry stays, but stops being shown. */
-  async resolve(mistakeId: string): Promise<void> {
+  /**
+   * "Bunu artık biliyorum" — the entry stays, but stops being shown.
+   * `at` is when the student said so; a change replayed later keeps it.
+   */
+  async resolve(mistakeId: string, at: string = new Date().toISOString()): Promise<void> {
     await this.execute(
       'topic_mistakes.resolve',
       this.db
         .from('topic_mistakes')
-        .update({ resolved_at: new Date().toISOString() })
+        .update({ resolved_at: at })
         .eq('id', mistakeId)
         .select('id')
         .single(),
@@ -120,25 +123,30 @@ export class TopicMistakeRepository extends BaseRepository {
     );
   }
 
+  /** Already gone counts as done: a delete replayed after a lost reply must not fail. */
   async remove(mistakeId: string): Promise<void> {
-    await this.execute(
-      'topic_mistakes.remove',
-      this.db.from('topic_mistakes').delete().eq('id', mistakeId).select('id').single(),
-    );
+    await this.execute('topic_mistakes.remove', this.db.from('topic_mistakes').delete().eq('id', mistakeId));
   }
 
-  async add(topicId: string, body: string, concept: string | null = null): Promise<void> {
+  /**
+   * Writes a new entry under the id the app chose, so the entry can be shown,
+   * edited or resolved before the server has seen it. Sending the same entry
+   * twice (a retry after a lost reply) is not an error.
+   */
+  async add(id: string, topicId: string, body: string, concept: string | null = null): Promise<void> {
     const userId = await this.requireUserId();
     const clean = normalizeMistake(body, concept);
     if (!clean) throw new AppError('validation', 'Takıldığın yeri en az iki harfle yaz.');
-    await this.execute(
-      'topic_mistakes.add',
-      this.db
-        .from('topic_mistakes')
-        .insert({ user_id: userId, topic_id: topicId, body: clean.body, concept: clean.concept })
-        .select('id')
-        .single(),
-    );
+    try {
+      await this.execute(
+        'topic_mistakes.add',
+        this.db
+          .from('topic_mistakes')
+          .insert({ id, user_id: userId, topic_id: topicId, body: clean.body, concept: clean.concept }),
+      );
+    } catch (error) {
+      if (toAppError(error).kind !== 'conflict') throw error;
+    }
   }
 }
 

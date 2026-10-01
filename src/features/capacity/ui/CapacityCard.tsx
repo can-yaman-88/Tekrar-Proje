@@ -145,7 +145,7 @@ function DayEditor({ row, capacity }: { row: CapacityRow; capacity: CapacityCont
         <Button
           label="Kaydet"
           loading={capacity.isSaving}
-          onPress={() => void capacity.save(row.weekday, mode, mode === 'manual' ? minutes : null)}
+          onPress={() => capacity.save(row.weekday, mode, mode === 'manual' ? minutes : null)}
           style={styles.flex}
         />
         <Button label="Vazgeç" variant="ghost" onPress={capacity.onCloseEditor} disabled={capacity.isSaving} />

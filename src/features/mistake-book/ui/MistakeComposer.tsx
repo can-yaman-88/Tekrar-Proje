@@ -21,9 +21,8 @@ export function MistakeComposer({
   const [body, setBody] = useState('');
   const [concept, setConcept] = useState('');
 
-  const submit = async () => {
-    const saved = await actions.add(topicId, body, concept.trim() === '' ? null : concept);
-    if (!saved) return;
+  const submit = () => {
+    if (!actions.add(topicId, body, concept.trim() === '' ? null : concept)) return;
     setBody('');
     setConcept('');
     onDone?.();
@@ -47,7 +46,7 @@ export function MistakeComposer({
         placeholder="Örn. Mol hesapları"
       />
       <View style={styles.actions}>
-        <Button label="Deftere ekle" loading={actions.isAdding} onPress={() => void submit()} style={styles.flex} />
+        <Button label="Deftere ekle" onPress={submit} style={styles.flex} />
         {onDone ? <Button label="Vazgeç" variant="ghost" onPress={onDone} /> : null}
       </View>
     </View>

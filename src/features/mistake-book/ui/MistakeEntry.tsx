@@ -64,13 +64,10 @@ export function MistakeEntry({ entry, actions }: { entry: MistakeEntryModel; act
         <View style={styles.editorActions}>
           <Button
             label="Kaydet"
-            loading={actions.isUpdating}
             style={styles.flex}
-            onPress={() =>
-              void actions.update(entry.id, body, concept.trim() === '' ? null : concept).then((saved) => {
-                if (saved) setEditing(false);
-              })
-            }
+            onPress={() => {
+              if (actions.update(entry.id, body, concept.trim() === '' ? null : concept)) setEditing(false);
+            }}
           />
           <Button
             label="Vazgeç"

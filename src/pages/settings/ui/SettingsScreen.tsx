@@ -68,7 +68,7 @@ export function SettingsScreen() {
 
         <WeeklyPlanCard
           autoEnabled={profile.data?.autoWeeklyPlan ?? true}
-          isSaving={autoWeeklyPlan.isPending || profile.isPending}
+          isSaving={(autoWeeklyPlan.isPending && !autoWeeklyPlan.isPaused) || profile.isPending}
           onToggleAuto={(enabled) => autoWeeklyPlan.mutate(enabled)}
         />
 

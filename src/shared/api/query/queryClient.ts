@@ -1,5 +1,6 @@
-import { QueryCache, QueryClient } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { toAppError } from '../../lib/errors';
+import { reportError } from '../telemetry';
 import { QUERY_CACHE_MAX_AGE_MS } from './persister';
 
 const MAX_RETRIES = 3;
@@ -11,7 +12,13 @@ export const queryClient = new QueryClient({
       if (__DEV__ && appError.kind !== 'network') {
         console.warn(`[query] ${JSON.stringify(query.queryKey)} failed: ${appError.kind} — ${appError.message}`);
       }
+      // Only the last failure is worth a report; retries come before it.
+      reportError(error, { source: 'query', where: JSON.stringify(query.queryKey.slice(0, 2)) });
     },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error, _variables, _context, mutation) =>
+      reportError(error, { source: 'mutation', where: JSON.stringify(mutation.options.mutationKey ?? null) }),
   }),
   defaultOptions: {
     queries: {

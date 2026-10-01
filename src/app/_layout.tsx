@@ -2,7 +2,7 @@ import { AppProviders } from '@core/index';
 import { useSessionStore } from '@entities/session';
 import { envError } from '@shared/config/env';
 import { ErrorState, Screen, useTheme } from '@shared/ui';
-import { Stack, type ErrorBoundaryProps } from 'expo-router';
+import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -56,19 +56,5 @@ export default function RootLayout() {
   );
 }
 
-/**
- * Expo Router renders this instead of a white screen when a screen throws.
- * Without it an unexpected render error would simply kill the app.
- */
-export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
-  return (
-    <Screen edges={['top', 'bottom']}>
-      <ErrorState
-        title="Beklenmeyen bir hata oluştu"
-        message={__DEV__ ? error.message : 'Ekran yüklenemedi. Tekrar denemek uygulamayı kurtarabilir.'}
-        actionLabel="Tekrar dene"
-        onAction={() => void retry()}
-      />
-    </Screen>
-  );
-}
+/** Expo Router shows this when a screen throws; it lives in core with the rest of the app shell. */
+export { RootErrorBoundary as ErrorBoundary } from '@core/index';

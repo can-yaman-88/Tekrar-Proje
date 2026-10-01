@@ -8,14 +8,24 @@ import {
 } from '@entities/topic-mistake';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
+import { onlineManager } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { useCallback } from 'react';
 
-const fail = (error: unknown) => showToast(describeError(error).message, 'danger');
+const fail = (error: unknown) => showToast(`${describeError(error).message} Değişiklik geri alındı.`, 'danger');
+
+/** Said once per write, so the student knows an offline change is not lost. */
+const queuedNote = () => (onlineManager.isOnline() ? '' : ' Bağlantı gelince kaydedilecek.');
+
+const TOO_SHORT = 'Takıldığın yeri en az iki harfle yaz.';
 
 /**
  * Everything the student can do to a book entry, with the feedback each one
  * deserves: a resolve can be taken back from the toast, a delete is asked for
- * first (by the screen), and nothing fails silently any more.
+ * first (by the screen), and nothing fails silently.
+ *
+ * Every write shows at once and waits in the offline queue when there is no
+ * connection; a write the server refuses is rolled back with a toast.
  */
 export function useMistakeActions() {
   const resolveMutation = useResolveMistake();
@@ -26,80 +36,74 @@ export function useMistakeActions() {
 
   const { mutate: reopenMutate } = reopenMutation;
   const reopen = useCallback(
-    (mistakeId: string, quiet = false) =>
-      reopenMutate(mistakeId, {
-        onSuccess: () => {
-          if (!quiet) showToast('Madde yeniden açıldı; konunun görevlerinde yine karşına çıkacak.', 'info');
-        },
-        onError: fail,
-      }),
+    (mistakeId: string, quiet = false) => {
+      reopenMutate(mistakeId, { onError: fail });
+      if (!quiet) showToast(`Madde yeniden açıldı; konunun görevlerinde yine karşına çıkacak.${queuedNote()}`, 'info');
+    },
     [reopenMutate],
   );
 
   const { mutate: resolveMutate } = resolveMutation;
   const resolve = useCallback(
-    (mistakeId: string) =>
-      resolveMutate(mistakeId, {
-        onSuccess: () =>
-          showToast('Çözüldü olarak işaretlendi.', 'success', {
-            label: 'Geri al',
-            onPress: () => reopen(mistakeId, true),
-          }),
-        onError: fail,
-      }),
+    (mistakeId: string) => {
+      resolveMutate({ mistakeId, at: new Date().toISOString() }, { onError: fail });
+      showToast(`Çözüldü olarak işaretlendi.${queuedNote()}`, 'success', {
+        label: 'Geri al',
+        onPress: () => reopen(mistakeId, true),
+      });
+    },
     [reopen, resolveMutate],
   );
 
   const { mutate: deleteMutate } = deleteMutation;
   const remove = useCallback(
-    (mistakeId: string) =>
-      deleteMutate(mistakeId, { onSuccess: () => showToast('Madde silindi.', 'info'), onError: fail }),
+    (mistakeId: string) => {
+      deleteMutate(mistakeId, { onError: fail });
+      showToast(`Madde silindi.${queuedNote()}`, 'info');
+    },
     [deleteMutate],
   );
 
-  const { mutateAsync: updateAsync } = updateMutation;
-  /** Resolves true when saved, so an inline editor knows to close. */
+  const { mutate: updateMutate } = updateMutation;
+  /** True when the change was taken, so an inline editor knows to close. */
   const update = useCallback(
-    async (mistakeId: string, body: string, concept: string | null): Promise<boolean> => {
+    (mistakeId: string, body: string, concept: string | null): boolean => {
       if (!normalizeMistake(body, concept)) {
-        showToast('Takıldığın yeri en az iki harfle yaz.', 'danger');
+        showToast(TOO_SHORT, 'danger');
         return false;
       }
-      try {
-        await updateAsync({ mistakeId, body, concept });
-        return true;
-      } catch (error) {
-        fail(error);
-        return false;
-      }
+      updateMutate({ mistakeId, body, concept }, { onError: fail });
+      const note = queuedNote();
+      if (note) showToast(`Düzeltildi.${note}`, 'info');
+      return true;
     },
-    [updateAsync],
+    [updateMutate],
   );
 
-  const { mutateAsync: addAsync } = addMutation;
+  const { mutate: addMutate } = addMutation;
   const add = useCallback(
-    async (topicId: string, body: string, concept: string | null): Promise<boolean> => {
+    (topicId: string, body: string, concept: string | null): boolean => {
       if (!normalizeMistake(body, concept)) {
-        showToast('Takıldığın yeri en az iki harfle yaz.', 'danger');
+        showToast(TOO_SHORT, 'danger');
         return false;
       }
-      try {
-        await addAsync({ topicId, body, concept });
-        showToast('Deftere eklendi; bu konunun görevini açtığında karşına çıkacak.', 'success');
-        return true;
-      } catch (error) {
-        fail(error);
-        return false;
-      }
+      addMutate({ id: Crypto.randomUUID(), topicId, body, concept }, { onError: fail });
+      showToast(`Deftere eklendi; bu konunun görevini açtığında karşına çıkacak.${queuedNote()}`, 'success');
+      return true;
     },
-    [addAsync],
+    [addMutate],
   );
+
+  // A write waiting for the network is not "busy": the entry already shows
+  // the result, and the queue keeps the order.
+  const inFlight = <T,>(mutation: { isPending: boolean; isPaused: boolean; variables: T | undefined }) =>
+    mutation.isPending && !mutation.isPaused ? mutation.variables : undefined;
 
   const busyId =
-    (resolveMutation.isPending ? resolveMutation.variables : null) ??
-    (reopenMutation.isPending ? reopenMutation.variables : null) ??
-    (deleteMutation.isPending ? deleteMutation.variables : null) ??
-    (updateMutation.isPending ? updateMutation.variables?.mistakeId : null) ??
+    inFlight(resolveMutation)?.mistakeId ??
+    inFlight(reopenMutation) ??
+    inFlight(deleteMutation) ??
+    inFlight(updateMutation)?.mistakeId ??
     null;
 
   return {
@@ -109,8 +113,6 @@ export function useMistakeActions() {
     update,
     add,
     busyId,
-    isAdding: addMutation.isPending,
-    isUpdating: updateMutation.isPending,
   };
 }
 
