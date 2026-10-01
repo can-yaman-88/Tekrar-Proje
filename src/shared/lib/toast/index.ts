@@ -1,1 +1,1 @@
-export { showToast, useToastStore, type Toast, type ToastTone } from './toast.store';
+export { showToast, useToastStore, type Toast, type ToastAction, type ToastTone } from './toast.store';

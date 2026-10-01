@@ -46,7 +46,7 @@ export class DailyLogRepository extends BaseRepository {
     if (log.status === 'pending' || log.status === 'processing') return { state: 'processing' };
     if (log.status === 'failed') return { state: 'failed', message: log.error_message };
 
-    const [updates, created, removed, mistakes] = await Promise.all([
+    const [updates, created, removed, mistakes, reviews] = await Promise.all([
       this.execute(
         'daily_logs.outcomeUpdates',
         this.db
@@ -66,6 +66,13 @@ export class DailyLogRepository extends BaseRepository {
         'daily_logs.outcomeMistakes',
         this.db.from('topic_mistakes').select('id').eq('source_daily_log_id', dailyLogId),
       ),
+      this.execute(
+        'daily_logs.outcomeReviews',
+        this.db
+          .from('topic_review_events')
+          .select('topic_id, next_review_on, interval_after, was_early, topic:topics!topic_review_events_topic_fk(title)')
+          .eq('daily_log_id', dailyLogId),
+      ),
     ]);
 
     return {
@@ -81,7 +88,20 @@ export class DailyLogRepository extends BaseRepository {
         createdTaskIds: created.map((row) => row.id),
         removedTaskIds: removed.map((row) => row.task_id),
         mistakesRecorded: mistakes.length,
-        reviewedTopicIds: [],
+        reviewedTopicIds: reviews.map((row) => row.topic_id),
+        scheduledReviews: reviews.flatMap((row) =>
+          row.next_review_on === null
+            ? []
+            : [
+                {
+                  topicId: row.topic_id,
+                  topicTitle: row.topic.title,
+                  nextReviewOn: row.next_review_on,
+                  intervalDays: row.interval_after,
+                  early: row.was_early,
+                },
+              ],
+        ),
         unmatchedMentions: [],
       },
     };

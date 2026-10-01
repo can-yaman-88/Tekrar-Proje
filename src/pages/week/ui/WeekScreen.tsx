@@ -1,4 +1,5 @@
 import { TaskCard, TaskCardSkeleton } from '@entities/task';
+import { ConfidenceSheet } from '@entities/topic';
 import { AppText, EmptyState, ErrorState, Screen, makeStyles, useTheme } from '@shared/ui';
 import { TaskGroupFilter } from '@widgets/task-group-filter';
 import { Pressable, RefreshControl, SectionList, View } from 'react-native';
@@ -111,6 +112,7 @@ export function WeekScreen() {
           <RefreshControl refreshing={vm.isRefreshing} onRefresh={vm.refresh} tintColor={colors.primary} />
         }
       />
+      <ConfidenceSheet {...vm.rating} secondary={{ label: 'Puanlamadan bitir', onPress: vm.rating.onSkip }} />
     </Screen>
   );
 }

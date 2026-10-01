@@ -6,6 +6,7 @@ const CHANNEL_ID = 'reminders';
 export const CHECKIN_ID_PREFIX = 'checkin';
 export const EXAM_ID_PREFIX = 'exam';
 export const SUMMARY_ID_PREFIX = 'summary';
+export const REVIEW_ID_PREFIX = 'review';
 
 /** Buttons on the evening reminder, so the app can be skipped entirely. */
 export const CHECKIN_CATEGORY = 'checkin-reminder';
@@ -182,6 +183,54 @@ export async function scheduleExamReminders(reminders: readonly ExamReminder[]):
 }
 
 export const cancelExamReminders = () => cancelByPrefix(EXAM_ID_PREFIX);
+
+export interface ReviewReminderDay {
+  /** The day the reviews fall due, on the student's calendar. */
+  date: string;
+  /** Topic titles, most urgent first. */
+  titles: readonly string[];
+}
+
+/**
+ * One notification per day that has reviews due, for the next two weeks.
+ * Replaces the whole set: the schedule moves with every review, so the old
+ * notifications are never trusted. Days already past their hour are skipped.
+ */
+export async function scheduleReviewReminders(days: readonly ReviewReminderDay[], hour: number): Promise<number> {
+  await cancelByPrefix(REVIEW_ID_PREFIX);
+  let scheduled = 0;
+
+  for (const day of days) {
+    if (day.titles.length === 0) continue;
+    const fireAt = new Date(`${day.date}T${String(hour).padStart(2, '0')}:00:00`);
+    if (fireAt.getTime() <= Date.now()) continue;
+
+    const [first, second] = day.titles;
+    const rest = day.titles.length - 2;
+    const body =
+      day.titles.length === 1
+        ? `${first} — kısa bir Feynman sayfası ve sınav seni bekliyor.`
+        : `${first}, ${second}${rest > 0 ? ` ve ${rest} konu daha` : ''}. Görevler listende.`;
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: `${REVIEW_ID_PREFIX}-${day.date}`,
+      content: {
+        title: day.titles.length === 1 ? 'Tekrar zamanı' : `Tekrar zamanı: ${day.titles.length} konu`,
+        body,
+        data: { route: '/notebook' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: fireAt,
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+    });
+    scheduled++;
+  }
+  return scheduled;
+}
+
+export const cancelReviewReminders = () => cancelByPrefix(REVIEW_ID_PREFIX);
 
 /** Wipes every scheduled reminder — used when the user signs out. */
 export const cancelAllReminders = () => Notifications.cancelAllScheduledNotificationsAsync();

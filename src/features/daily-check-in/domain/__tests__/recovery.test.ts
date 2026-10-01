@@ -14,6 +14,7 @@ const succeeded: CheckinOutcome = {
     movedTaskIds: [],
     mistakesRecorded: 0,
     reviewedTopicIds: [],
+    scheduledReviews: [],
     unmatchedMentions: [],
   },
 };

@@ -9,6 +9,7 @@ import {
   type TaskPatch,
   type TaskStatus,
 } from '@entities/task';
+import { reviewKeys, topicKeys } from '@entities/topic';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -66,7 +67,12 @@ export function useTaskEditForm(task: Task, options: { onDeleted: () => void }) 
       taskRepository.updateStatus(taskId, status),
     onSuccess: (updated) => {
       queryClient.setQueryData(taskKeys.detail(task.id), updated);
-      return invalidate();
+      // Finishing or failing work moves its topic's review schedule too.
+      return Promise.all([
+        invalidate(),
+        queryClient.invalidateQueries({ queryKey: topicKeys.all }),
+        queryClient.invalidateQueries({ queryKey: reviewKeys.all }),
+      ]);
     },
     onError: (error) => showToast(describeError(error).message, 'danger'),
   });

@@ -1,4 +1,5 @@
 import { taskKeys, taskRepository } from '@entities/task';
+import { reviewKeys, topicKeys } from '@entities/topic';
 import { useQueryClient } from '@tanstack/react-query';
 import { showToast } from '@shared/lib/toast';
 import * as Notifications from 'expo-notifications';
@@ -33,7 +34,11 @@ export function useNotificationActions(): void {
             showToast('Bu görev zaten tamamlanmıştı.', 'info');
           } else {
             await taskRepository.updateStatus(taskId, 'completed');
-            await queryClient.invalidateQueries({ queryKey: taskKeys.all });
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+              queryClient.invalidateQueries({ queryKey: topicKeys.all }),
+              queryClient.invalidateQueries({ queryKey: reviewKeys.all }),
+            ]);
             showToast(`${task.title} tamamlandı.`, 'success');
           }
         } catch {
@@ -49,6 +54,7 @@ export function useNotificationActions(): void {
       }
 
       if (route === '/weekly-summary') router.push('/weekly-summary');
+      if (route === '/notebook') router.push('/notebook');
     };
 
     // A response that launched the app from cold start is waiting here.

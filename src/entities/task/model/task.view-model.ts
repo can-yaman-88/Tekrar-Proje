@@ -61,6 +61,7 @@ export function toTaskCardModel(
   const meta = [group === 'homework' ? TASK_GROUP_LABEL.homework : TASK_TYPE_LABEL[task.type]];
   if (task.estimatedMinutes) meta.push(`${task.estimatedMinutes} dk`);
   if (task.source === 'ai_checkin_reschedule') meta.push('Ertelendi');
+  if (task.source === 'spaced_repetition') meta.push('Aralıklı tekrar');
 
   return {
     id: task.id,

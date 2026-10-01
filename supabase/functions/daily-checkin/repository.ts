@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import type { IsoDate } from '../_shared/contracts/enums.contract.ts';
 import type { Json } from '../_shared/database.types.ts';
-import { buildCapacitySamples, learnDailyCapacity, LOOKBACK_WEEKS } from '../_shared/domain/capacity.ts';
+import {
+  localDateIn,
+  LOOKBACK_WEEKS,
+  parseCapacityOverrides,
+  resolveCapacity,
+} from '../_shared/domain/capacity.ts';
 import { addDays } from '../_shared/domain/dates.ts';
 import { HttpError } from '../_shared/errors.ts';
 import type { TypedClient } from '../_shared/supabase.ts';
@@ -28,6 +33,8 @@ const MAX_TOPICS = 300;
 const MAX_COURSES = 40;
 const MAX_EXAMS = 30;
 const MAX_OPEN_MISTAKES = 40;
+/** Far enough back to know whether a topic was already counted on a reported day. */
+const REVIEW_HISTORY_DAYS = 30;
 /** Yesterday's exam is still correctable; last month's is not. */
 const EXAM_LOOKBACK_DAYS = 1;
 const MAX_ATTACHMENTS = 5;
@@ -121,7 +128,7 @@ export class CheckinRepository {
   }
 
   async loadContext(logDate: IsoDate): Promise<CheckinContext> {
-    const [tasksResult, topicsResult, coursesResult, examsResult, mistakesResult] = await Promise.all([
+    const [tasksResult, topicsResult, coursesResult, examsResult, mistakesResult, reviewsResult] = await Promise.all([
       this.user
         .from('tasks')
         .select(
@@ -135,7 +142,9 @@ export class CheckinRepository {
         .limit(MAX_TASKS),
       this.user
         .from('topics')
-        .select('id, title, week_number, ease_factor, interval_days, repetitions, course:courses!topics_course_fk(name)')
+        .select(
+          'id, title, week_number, ease_factor, interval_days, repetitions, next_review_on, last_reviewed_at, course:courses!topics_course_fk(name)',
+        )
         .order('course_id')
         .order('week_number', { ascending: true, nullsFirst: false })
         .limit(MAX_TOPICS),
@@ -153,6 +162,12 @@ export class CheckinRepository {
         .is('resolved_at', null)
         .order('created_at', { ascending: false })
         .limit(MAX_OPEN_MISTAKES),
+      this.user
+        .from('topic_review_events')
+        .select('topic_id, reviewed_on')
+        .gte('reviewed_on', addDays(logDate, -REVIEW_HISTORY_DAYS))
+        .order('reviewed_on', { ascending: false })
+        .limit(1000),
     ]);
 
     if (tasksResult.error) throw dbError('load tasks', tasksResult.error);
@@ -160,6 +175,14 @@ export class CheckinRepository {
     if (coursesResult.error) throw dbError('load courses', coursesResult.error);
     if (examsResult.error) throw dbError('load exams', examsResult.error);
     if (mistakesResult.error) throw dbError('load open mistakes', mistakesResult.error);
+    if (reviewsResult.error) throw dbError('load review history', reviewsResult.error);
+
+    // The last day each topic was counted, by a tap or an earlier report. Rows
+    // come newest first, so the first one seen per topic is the one that counts.
+    const lastReviewedOn = new Map<string, IsoDate>();
+    for (const row of reviewsResult.data) {
+      if (!lastReviewedOn.has(row.topic_id)) lastReviewedOn.set(row.topic_id, row.reviewed_on);
+    }
 
     return {
       tasks: tasksResult.data.map((t) => ({
@@ -181,6 +204,10 @@ export class CheckinRepository {
         courseName: t.course.name,
         weekNumber: t.week_number,
         srs: { easeFactor: Number(t.ease_factor), intervalDays: t.interval_days, repetitions: t.repetitions },
+        nextReviewOn: t.next_review_on,
+        // Reviews from before the history existed only left a timestamp (UTC,
+        // as the database reads it too).
+        lastReviewedOn: lastReviewedOn.get(t.id) ?? t.last_reviewed_at?.slice(0, 10) ?? null,
       })),
       courses: coursesResult.data.map((c) => ({ id: c.id, name: c.name })),
       exams: examsResult.data.map((e) => ({
@@ -205,42 +232,58 @@ export class CheckinRepository {
     const [finishedResult, sessionsResult, profileResult] = await Promise.all([
       this.user
         .from('tasks')
-        .select('completed_at, estimated_minutes')
+        .select('id, parent_task_id, completed_at, estimated_minutes')
         .eq('status', 'completed')
-        .gte('completed_at', `${historyStart}T00:00:00Z`)
-        .lt('completed_at', `${logDate}T00:00:00Z`),
+        // A day of slack on either side: the cut is made on the local calendar below.
+        .gte('completed_at', `${addDays(historyStart, -1)}T00:00:00Z`)
+        .lt('completed_at', `${addDays(logDate, 1)}T00:00:00Z`)
+        .limit(2000),
       this.user
         .from('task_sessions')
-        .select('started_at, minutes')
-        .gte('started_at', `${historyStart}T00:00:00Z`)
-        .not('minutes', 'is', null),
-      this.user.from('profiles').select('blocked_weekdays').eq('id', this.userId).maybeSingle(),
+        .select('task_id, started_at, minutes')
+        .gte('started_at', `${addDays(historyStart, -1)}T00:00:00Z`)
+        .not('minutes', 'is', null)
+        .limit(2000),
+      this.user
+        .from('profiles')
+        .select('blocked_weekdays, capacity_overrides, timezone')
+        .eq('id', this.userId)
+        .maybeSingle(),
     ]);
 
     if (finishedResult.error) throw dbError('load finished tasks', finishedResult.error);
     if (sessionsResult.error) throw dbError('load sessions', sessionsResult.error);
     if (profileResult.error) throw dbError('load profile', profileResult.error);
 
-    const days: IsoDate[] = [];
-    for (let day = historyStart; day < logDate; day = addDays(day, 1)) days.push(day);
-
-    const estimated = finishedResult.data.flatMap((task) =>
-      task.completed_at === null ? [] : [{ date: task.completed_at.slice(0, 10), minutes: task.estimated_minutes ?? 0 }],
-    );
-    const measured = sessionsResult.data.flatMap((session) =>
-      session.minutes === null ? [] : [{ date: session.started_at.slice(0, 10), minutes: session.minutes }],
-    );
-    const { samples } = buildCapacitySamples(measured, estimated);
-    const learned = learnDailyCapacity(samples, days);
-
+    const timeZone = profileResult.data?.timezone ?? 'UTC';
     const blockedWeekdays = (profileResult.data?.blocked_weekdays ?? []).filter(
       (weekday) => weekday >= 1 && weekday <= 7,
     );
-    // A closed day is worth nothing, whatever the history says about it.
-    const capacityByWeekday = { ...learned.minutesByWeekday };
-    for (const weekday of blockedWeekdays) capacityByWeekday[weekday] = 0;
+    const capacity = resolveCapacity({
+      today: logDate,
+      finished: finishedResult.data.flatMap((task) =>
+        task.completed_at === null
+          ? []
+          : [
+              {
+                taskId: task.id,
+                parentTaskId: task.parent_task_id,
+                finishedOn: localDateIn(task.completed_at, timeZone),
+                estimatedMinutes: task.estimated_minutes,
+              },
+            ],
+      ),
+      timed: sessionsResult.data.flatMap((session) =>
+        session.minutes === null
+          ? []
+          : [{ taskId: session.task_id, startedOn: localDateIn(session.started_at, timeZone), minutes: session.minutes }],
+      ),
+      blockedWeekdays,
+      overrides: parseCapacityOverrides(profileResult.data?.capacity_overrides),
+    });
 
-    return { capacityByWeekday, blockedWeekdays };
+    // A closed day is worth nothing, whatever the history says about it.
+    return { capacityByWeekday: { ...capacity.minutesByWeekday }, blockedWeekdays };
   }
 
   /** Downloads every file attached to this check-in from the private bucket. */
@@ -320,6 +363,29 @@ export class CheckinRepository {
         console.error(JSON.stringify({ event: 'checkin_edits_failed', message: editError.message }));
       }
     }
+    // The review history and the real days work was done on are side records
+    // too: the schedule itself is already written, these only describe it.
+    if (plan.topicReviews.length > 0) {
+      const { error: reviewError } = await this.service.rpc('record_checkin_reviews', {
+        p_user_id: this.userId,
+        p_daily_log_id: dailyLogId,
+        p_reviews: plan.topicReviews satisfies Json,
+      });
+      if (reviewError) {
+        console.warn(JSON.stringify({ event: 'review_history_write_failed', message: reviewError.message }));
+      }
+    }
+    if (plan.completionDays.length > 0) {
+      const { error: backdateError } = await this.service.rpc('backdate_checkin_completions', {
+        p_user_id: this.userId,
+        p_daily_log_id: dailyLogId,
+        p_completions: plan.completionDays satisfies Json,
+      });
+      if (backdateError) {
+        console.warn(JSON.stringify({ event: 'completion_days_write_failed', message: backdateError.message }));
+      }
+    }
+
     // The mistake book is a side record: worth keeping, never worth failing a
     // check-in over, so it is written after the transaction that matters.
     let mistakesRecorded = 0;

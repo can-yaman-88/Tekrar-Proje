@@ -24,6 +24,22 @@ export const DailyCheckinResponseSchema = z.object({
   /** New entries in the mistake book. */
   mistakesRecorded: z.number().int().default(0),
   reviewedTopicIds: z.array(z.uuid()),
+  /**
+   * Where each reviewed topic now sits on the schedule — the "next time" the
+   * student should hear about right away, not discover in a menu.
+   */
+  scheduledReviews: z
+    .array(
+      z.object({
+        topicId: z.uuid(),
+        topicTitle: z.string(),
+        nextReviewOn: z.string(),
+        intervalDays: z.number().int(),
+        /** Practice before the due day: the clock restarted, the interval did not grow. */
+        early: z.boolean(),
+      }),
+    )
+    .default([]),
   unmatchedMentions: z.array(z.string()),
 });
 export type DailyCheckinResponse = z.infer<typeof DailyCheckinResponseSchema>;

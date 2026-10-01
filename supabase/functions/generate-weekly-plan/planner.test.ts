@@ -272,3 +272,51 @@ Deno.test('ikisi bir güne sığmazsa ayrılır ve bu bildirilir', () => {
   assertEquals(dayOf('concept_note') === dayOf('feynman'), false);
   assertEquals(notes.some((n) => n.includes('aynı güne sığmadı')), true);
 });
+
+Deno.test('kapalı güne hiç iş düşmez — kapasitesi sıfır olsa bile yarım saate yuvarlanmaz', () => {
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: ['a', 'b', 'c', 'd'].map((id) => topic(id)),
+    exams: [],
+    capacityByWeekday: { 1: 60, 2: 60, 3: 60, 4: 60, 5: 60, 6: 60, 7: 0 },
+    blockedWeekdays: [7],
+  });
+  const SUNDAY = '2026-09-27';
+  assertEquals(slots.length > 0, true);
+  assertEquals(slots.some((s) => s.dueDate === SUNDAY), false);
+});
+
+Deno.test('tekrar, vadesi gelmeden önceki bir güne konmaz', () => {
+  const THURSDAY = '2026-09-24';
+  const { slots } = planWeek({
+    weekStart: MONDAY,
+    topics: [topic('a', { completedSteps: ['concept_note', 'quiz', 'feynman'], nextReviewOn: THURSDAY })],
+    exams: [],
+    dailyCapacityMinutes: 400,
+  });
+  assertEquals(slots.map((s) => [s.step, s.dueDate >= THURSDAY]), [
+    ['feynman', true],
+    ['quiz', true],
+  ]);
+  // Sınav yine Feynman'dan sonraki güne kalır.
+  assertEquals((slots[1]?.dueDate ?? '') > (slots[0]?.dueDate ?? ''), true);
+});
+
+Deno.test('öğrenilmiş bütçeden ders saati ikinci kez düşülmez', () => {
+  const plan = (source: 'learned' | 'default') =>
+    planWeek({
+      weekStart: MONDAY,
+      topics: [topic('a')],
+      exams: [],
+      courseClassDays: { c1: [1] },
+      // Pazartesi 6 saat ders; öğrenci pazartesileri gerçekten 60 dakika çalışıyor.
+      classLoad: { 1: 360 },
+      capacityByWeekday: { 1: 60, 2: 60, 3: 60, 4: 60, 5: 60, 6: 60, 7: 60 },
+      capacitySources: { 1: source, 2: source, 3: source, 4: source, 5: source, 6: source, 7: source },
+    });
+
+  // Ölçülmüş 60 dakika, konsept + Feynman (55 dk) için pazartesi yeterli.
+  assertEquals(plan('learned').slots[0]?.dueDate, MONDAY);
+  // Tahmini bütçede 6 saatlik ders günü tabana iner, iş başka güne kayar.
+  assertEquals(plan('default').slots[0]?.dueDate === MONDAY, false);
+});

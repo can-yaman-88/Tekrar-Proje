@@ -17,7 +17,7 @@ import {
   qualityForCompletion,
   qualityForFailure,
   type RecallQuality,
-  reviewSm2,
+  scheduleReview,
   type SrsState,
   WEAK_ACCURACY,
 } from '../_shared/domain/spaced-repetition.ts';
@@ -45,6 +45,13 @@ export interface CandidateTopic {
   /** Which teaching week this topic belongs to; scopes "sadece ilk haftanın". */
   weekNumber: number | null;
   srs: SrsState;
+  /** When the next review is due; null/absent = never scheduled (counts as due). */
+  nextReviewOn?: IsoDate | null;
+  /**
+   * The last day a review of this topic was counted — by a tap in the app or an
+   * earlier report. A report describing the same day must not count it again.
+   */
+  lastReviewedOn?: IsoDate | null;
 }
 
 /** Courses, only so a newly announced exam can be attached to one. */
@@ -87,6 +94,23 @@ export type TopicReviewRow = {
   interval_days: number;
   repetitions: number;
   next_review_on: IsoDate;
+  // The rest is for the review history (record_checkin_reviews); the
+  // transactional RPC reads only the columns above.
+  quality: RecallQuality;
+  /** The day the work happened, which is what the schedule counts from. */
+  reviewed_on: IsoDate;
+  confidence: number | null;
+  correct_count: number | null;
+  attempted_count: number | null;
+  /** Practice before the due day: logged, but the interval did not grow. */
+  early: boolean;
+  task_id: string | null;
+};
+
+/** A task this report closed for an earlier day: its completion is dated to that day. */
+export type CompletionDayRow = {
+  task_id: string;
+  completed_on: IsoDate;
 };
 
 export type TaskSource = 'ai_checkin_reschedule' | 'ai_attachment' | 'homework';
@@ -202,6 +226,8 @@ export interface CheckinPlan {
   /** Distinct days the report talked about, oldest first. */
   coveredDates: IsoDate[];
   taskUpdates: TaskUpdateRow[];
+  /** Work finished on an earlier day than the report: capacity counts it there. */
+  completionDays: CompletionDayRow[];
   topicReviews: TopicReviewRow[];
   topicFlags: TopicFlagRow[];
   topicMistakes: TopicMistakeRow[];
@@ -317,6 +343,16 @@ type Draft = Omit<NewTaskRow, 'due_date' | 'id' | 'parent_task_id'> & {
 
 const MAX_STEPS_PER_TASK = 10;
 
+/** What a review rested on: shown later as "güven 4/5 · 8/10 doğru". */
+interface ReviewDetail {
+  confidence: number | null;
+  correctCount: number | null;
+  attemptedCount: number | null;
+  taskId: string | null;
+}
+
+const NO_DETAIL: ReviewDetail = { confidence: null, correctCount: null, attemptedCount: null, taskId: null };
+
 export function planCheckinEffects({
   logDate,
   extraction,
@@ -360,8 +396,11 @@ export function planCheckinEffects({
   // A catch-up report ("pazartesi şunu, dün bunu") spreads over several days;
   // the review schedule must start from the day the work really happened.
   const worstQualityByTopic = new Map<string, RecallQuality>();
+  /** What the worst review rested on, for the history the student reads later. */
+  const reviewDetailByTopic = new Map<string, ReviewDetail>();
   const reviewDateByTopic = new Map<string, IsoDate>();
   const coveredDates = new Set<IsoDate>();
+  const completionDays: CompletionDayRow[] = [];
 
   const dayOf = (daysAgo: number | null): IsoDate => {
     if (daysAgo === null || !Number.isFinite(daysAgo)) return logDate;
@@ -392,9 +431,12 @@ export function planCheckinEffects({
   };
   let droppedReferences = 0;
 
-  const recordQuality = (topicId: string, quality: RecallQuality, day: IsoDate) => {
+  const recordQuality = (topicId: string, quality: RecallQuality, day: IsoDate, detail: ReviewDetail = NO_DETAIL) => {
     const previous = worstQualityByTopic.get(topicId);
-    if (previous === undefined || quality < previous) worstQualityByTopic.set(topicId, quality);
+    if (previous === undefined || quality < previous) {
+      worstQualityByTopic.set(topicId, quality);
+      reviewDetailByTopic.set(topicId, detail);
+    }
     // The most recent day wins: that is when the topic was last seen.
     const currentDay = reviewDateByTopic.get(topicId);
     if (currentDay === undefined || day > currentDay) reviewDateByTopic.set(topicId, day);
@@ -440,6 +482,12 @@ export function planCheckinEffects({
     const qualityOf = (fallback: RecallQuality): RecallQuality =>
       accuracy === null ? fallback : qualityForAccuracy(accuracy);
     const accuracyIsWeak = accuracy !== null && accuracy < WEAK_ACCURACY;
+    const detail: ReviewDetail = {
+      confidence,
+      correctCount: accuracy === null ? null : correct,
+      attemptedCount: accuracy === null ? null : attempted,
+      taskId: task.id,
+    };
     /** A solved difficulty is scored as the finish it was, not as a failure. */
     const qualityAfterStruggle = (fallback: RecallQuality): RecallQuality =>
       weakResolved && accuracy === null ? qualityForCompletion(confidence) : qualityOf(fallback);
@@ -469,9 +517,9 @@ export function planCheckinEffects({
       });
 
       if (outcome.outcome === 'failed') {
-        recordQuality(task.topicId, qualityOf(qualityForFailure(confidence)), happenedOn);
+        recordQuality(task.topicId, qualityOf(qualityForFailure(confidence)), happenedOn, detail);
       } else if (status === 'completed') {
-        recordQuality(task.topicId, qualityOf(qualityForCompletion(confidence)), happenedOn);
+        recordQuality(task.topicId, qualityOf(qualityForCompletion(confidence)), happenedOn, detail);
       }
       continue; // a correction never creates follow-up work on its own
     }
@@ -479,7 +527,8 @@ export function planCheckinEffects({
     switch (outcome.outcome) {
       case 'completed': {
         taskUpdates.push({ ...base, new_status: 'completed', problems_solved: problemsSolved ?? remaining });
-        recordQuality(task.topicId, qualityOf(qualityForCompletion(confidence)), happenedOn);
+        if (happenedOn < logDate) completionDays.push({ task_id: task.id, completed_on: happenedOn });
+        recordQuality(task.topicId, qualityOf(qualityForCompletion(confidence)), happenedOn, detail);
         // Finished, but mostly wrong: the work is done and the topic is not.
         if (accuracyIsWeak && weakConcept === null && weakDetail === null) {
           noteMistake(task.topicId, `${task.title}: isabet ${correct}/${attempted}`, null, task.id);
@@ -511,7 +560,7 @@ export function planCheckinEffects({
           if (weakConcept === null && weakDetail === null) {
             noteMistake(task.topicId, `${task.title}: anlamadan ilerledim`, null, task.id, weakResolved);
           }
-          recordQuality(task.topicId, qualityAfterStruggle(qualityForFailure(confidence)), happenedOn);
+          recordQuality(task.topicId, qualityAfterStruggle(qualityForFailure(confidence)), happenedOn, detail);
           if (weakResolved) break; // sorted out already: no remedial work
           remediatedTopicIds.add(task.topicId);
           const left = remaining === null ? null : remaining - (solved ?? 0);
@@ -529,6 +578,7 @@ export function planCheckinEffects({
           break;
         }
         taskUpdates.push({ ...base, new_status: finished ? 'completed' : 'in_progress', problems_solved: solved });
+        if (finished && happenedOn < logDate) completionDays.push({ task_id: task.id, completed_on: happenedOn });
         break;
       }
       case 'failed': {
@@ -536,7 +586,7 @@ export function planCheckinEffects({
         if (weakConcept === null && weakDetail === null) {
           noteMistake(task.topicId, `${task.title}: takıldım`, null, task.id, weakResolved);
         }
-        recordQuality(task.topicId, qualityAfterStruggle(qualityForFailure(confidence)), happenedOn);
+        recordQuality(task.topicId, qualityAfterStruggle(qualityForFailure(confidence)), happenedOn, detail);
         if (weakResolved) break; // sorted out already: no remedial work
         remediatedTopicIds.add(task.topicId);
         const left = remaining === null ? null : remaining - (problemsSolved ?? 0);
@@ -587,6 +637,7 @@ export function planCheckinEffects({
         ? qualityForCompletion(clampConfidence(struggle.confidence))
         : qualityForFailure(clampConfidence(struggle.confidence)),
       struggleDay,
+      { ...NO_DETAIL, confidence: clampConfidence(struggle.confidence) },
     );
 
     const concept = clamp(struggle.concept, 120) ?? topic.title;
@@ -1093,17 +1144,31 @@ export function planCheckinEffects({
   for (const [topicId, quality] of worstQualityByTopic) {
     const topic = topicById.get(topicId);
     if (!topic) continue; // task's topic outside the candidate window: skip SRS, keep task update
-    const next = reviewSm2(topic.srs, quality);
     const seenOn = reviewDateByTopic.get(topicId) ?? logDate;
+    // Same rules as a tap in the app: a session already counted today — say,
+    // ticked off this afternoon — is not counted again tonight.
+    const decision = scheduleReview(topic.srs, quality, {
+      reviewedOn: seenOn,
+      dueOn: topic.nextReviewOn ?? null,
+      lastReviewedOn: topic.lastReviewedOn ?? null,
+    });
+    if (!decision.counted) continue;
+    const detail = reviewDetailByTopic.get(topicId) ?? NO_DETAIL;
     // Never schedule a review in the past: a three-day-old session with a
     // one-day interval is due now, not yesterday.
-    const nextReview = addDays(seenOn, next.intervalDays);
     topicReviews.push({
       topic_id: topicId,
-      ease_factor: next.easeFactor,
-      interval_days: next.intervalDays,
-      repetitions: next.repetitions,
-      next_review_on: nextReview < logDate ? logDate : nextReview,
+      ease_factor: decision.state.easeFactor,
+      interval_days: decision.state.intervalDays,
+      repetitions: decision.state.repetitions,
+      next_review_on: decision.nextReviewOn < logDate ? logDate : decision.nextReviewOn,
+      quality,
+      reviewed_on: seenOn,
+      confidence: detail.confidence,
+      correct_count: detail.correctCount,
+      attempted_count: detail.attemptedCount,
+      early: decision.early,
+      task_id: detail.taskId,
     });
   }
 
@@ -1125,6 +1190,7 @@ export function planCheckinEffects({
     summary: clamp(extraction.summary, 500) ?? 'Check-in processed.',
     coveredDates: [...coveredDates].sort(),
     taskUpdates,
+    completionDays,
     topicReviews,
     topicFlags,
     topicMistakes: [...mistakesByTopic.values()].flat(),

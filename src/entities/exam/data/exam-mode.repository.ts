@@ -45,6 +45,8 @@ export interface ExamTopicReview {
   interval_days: number;
   repetitions: number;
   next_review_on: IsoDate;
+  /** SM-2 quality the exam was worth for this topic; kept in the review history. */
+  quality?: number;
 }
 
 export class ExamModeRepository extends BaseRepository {

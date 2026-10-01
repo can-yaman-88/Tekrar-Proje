@@ -7,5 +7,6 @@ export {
   useProfile,
   useSetAutoWeeklyPlan,
   useSetBlockedWeekdays,
+  useSetCapacityOverrides,
   useSetLlmApiKey,
 } from './model/profile.queries';

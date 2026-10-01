@@ -1,4 +1,6 @@
 // SM-2 (Wozniak, 1990). Pure and deterministic — unit-testable without I/O.
+import type { IsoDate } from '../contracts/enums.contract.ts';
+import { addDays } from './dates.ts';
 
 export interface SrsState {
   easeFactor: number;
@@ -55,4 +57,50 @@ export function qualityForCompletion(confidence: number | null): RecallQuality {
 export function qualityForFailure(confidence: number | null): RecallQuality {
   if (confidence === null || confidence <= 1) return 0;
   return confidence === 2 ? 1 : 2;
+}
+
+// ---------------------------------------------------------------------------
+// When a review counts.
+//
+// The same rules run in SQL (public.apply_topic_review) for work ticked off in
+// the app, and here for check-ins — a tap in the afternoon and a report in the
+// evening describe the same study session, and must not count it twice.
+// ---------------------------------------------------------------------------
+
+export interface ReviewTiming {
+  /** The student's local day the review happened on. */
+  reviewedOn: IsoDate;
+  /** When the topic was due; null = never scheduled, which counts as due. */
+  dueOn: IsoDate | null;
+  /** The last day a review of this topic was counted; null = never. */
+  lastReviewedOn: IsoDate | null;
+}
+
+export type ReviewDecision =
+  | { counted: false }
+  | { counted: true; state: SrsState; nextReviewOn: IsoDate; early: boolean };
+
+/**
+ * · once a day: a second pass on a day already counted changes nothing — but
+ *   a failure always counts, because it is news
+ * · a review older than the last counted one is history, not news
+ * · a pass before the due day is practice: the clock restarts from that day,
+ *   the interval does not grow (otherwise three days of homework in a row
+ *   would stretch the interval to weeks without a single real gap)
+ * · otherwise: one SM-2 step, counted from the day it happened
+ */
+export function scheduleReview(state: SrsState, quality: RecallQuality, timing: ReviewTiming): ReviewDecision {
+  const { reviewedOn, dueOn, lastReviewedOn } = timing;
+  const failed = quality < 3;
+  if (lastReviewedOn !== null && (lastReviewedOn > reviewedOn || (lastReviewedOn === reviewedOn && !failed))) {
+    return { counted: false };
+  }
+
+  if (!failed && dueOn !== null && reviewedOn < dueOn) {
+    const restarted = addDays(reviewedOn, Math.max(1, state.intervalDays));
+    return { counted: true, state: { ...state }, nextReviewOn: restarted > dueOn ? restarted : dueOn, early: true };
+  }
+
+  const next = reviewSm2(state, quality);
+  return { counted: true, state: next, nextReviewOn: addDays(reviewedOn, next.intervalDays), early: false };
 }

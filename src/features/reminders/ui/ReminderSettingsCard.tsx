@@ -1,11 +1,15 @@
 import { AppText, Card, SegmentedControl, makeStyles } from '@shared/ui';
 import { Switch, View } from 'react-native';
 import type { RemindersController } from '../model/useReminders';
-import type { ReminderHour } from '../model/reminders.store';
+import type { ReminderHour, ReviewHour } from '../model/reminders.store';
 
 export function ReminderSettingsCard({ reminders }: { reminders: RemindersController }) {
   const styles = useStyles();
   const hourOptions = reminders.hours.map((hour) => ({ value: String(hour) as `${ReminderHour}`, label: `${hour}:00` }));
+  const reviewHourOptions = reminders.reviewHours.map((hour) => ({
+    value: String(hour) as `${ReviewHour}`,
+    label: `${String(hour).padStart(2, '0')}:00`,
+  }));
 
   return (
     <Card style={styles.card}>
@@ -51,6 +55,31 @@ export function ReminderSettingsCard({ reminders }: { reminders: RemindersContro
           onChange={(value) => reminders.setCheckinHour(Number(value) as ReminderHour)}
           disabled={reminders.isBusy}
           accessibilityLabel="Hatırlatma saati"
+        />
+      ) : null}
+
+      <View style={styles.row}>
+        <View style={styles.rowText}>
+          <AppText>Tekrar zamanı</AppText>
+          <AppText variant="caption" tone="muted">
+            Bir konunun aralıklı tekrar günü geldiğinde haber verir; kaçırılan tekrar ertesi gün yine hatırlatılır.
+          </AppText>
+        </View>
+        <Switch
+          accessibilityLabel="Tekrar hatırlatmaları"
+          value={reminders.reviewsEnabled}
+          disabled={reminders.isBusy}
+          onValueChange={reminders.setReviewsEnabled}
+        />
+      </View>
+
+      {reminders.reviewsEnabled ? (
+        <SegmentedControl
+          options={reviewHourOptions}
+          value={String(reminders.reviewHour) as `${ReviewHour}`}
+          onChange={(value) => reminders.setReviewHour(Number(value) as ReviewHour)}
+          disabled={reminders.isBusy}
+          accessibilityLabel="Tekrar hatırlatma saati"
         />
       ) : null}
 

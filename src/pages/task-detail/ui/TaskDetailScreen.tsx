@@ -5,7 +5,7 @@ import { TaskTimerCard } from '@features/task-timer';
 import { formatShortDate } from '@shared/lib/date';
 import { AppText, Card, ErrorState, Screen, Skeleton, makeStyles } from '@shared/ui';
 import { useLocalSearchParams } from 'expo-router';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { useTaskDetail } from '../model/useTaskDetail';
 import { TaskAllocationSection } from './TaskAllocationSection';
 import { TaskEditSection } from './TaskEditSection';
@@ -63,6 +63,13 @@ export function TaskDetailScreen() {
                 {detail.header.accuracyLabel}
               </AppText>
             ) : null}
+            {detail.review ? (
+              <Pressable accessibilityRole="button" onPress={detail.review.onOpen} hitSlop={8} style={styles.reviewLink}>
+                <AppText variant="caption" tone={detail.review.isDue ? 'warning' : 'primary'}>
+                  {detail.review.label} ›
+                </AppText>
+              </Pressable>
+            ) : null}
           </View>
 
           <MistakeList
@@ -112,5 +119,6 @@ const useStyles = makeStyles(({ spacing }) => ({
   flex: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   headerBlock: { gap: spacing.xxs },
+  reviewLink: { alignSelf: 'flex-start', paddingTop: spacing.xs },
   notes: { gap: spacing.sm, marginTop: spacing.lg },
 }));

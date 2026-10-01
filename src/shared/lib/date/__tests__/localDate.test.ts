@@ -1,4 +1,12 @@
-import { addDays, diffInDays, formatShortDate, todayLocal } from '../localDate';
+import {
+  addDays,
+  diffInDays,
+  formatMinutes,
+  formatRelativeDay,
+  formatShortDate,
+  localDateOf,
+  todayLocal,
+} from '../localDate';
 
 describe('yerel tarih yardımcıları', () => {
   it('takvim günü cihazın yerel gününü verir', () => {
@@ -21,5 +29,26 @@ describe('yerel tarih yardımcıları', () => {
 
   it('kısa tarih Türkçe biçimlenir', () => {
     expect(formatShortDate('2026-09-23')).toMatch(/Eyl/);
+  });
+
+  it('zaman damgası cihazın kendi takvim gününe çevrilir', () => {
+    const lateNight = new Date(2026, 8, 23, 1, 30); // yerel 01:30
+    expect(localDateOf(lateNight.toISOString())).toBe('2026-09-23');
+    expect(localDateOf('bozuk-değer')).toBe('bozuk-değe');
+  });
+
+  it('göreli gün öğrencinin diliyle söylenir', () => {
+    expect(formatRelativeDay('2026-09-23', '2026-09-23')).toBe('bugün');
+    expect(formatRelativeDay('2026-09-24', '2026-09-23')).toBe('yarın');
+    expect(formatRelativeDay('2026-09-22', '2026-09-23')).toBe('dün');
+    expect(formatRelativeDay('2026-09-26', '2026-09-23')).toBe('3 gün sonra');
+    expect(formatRelativeDay('2026-09-18', '2026-09-23')).toBe('5 gün önce');
+  });
+
+  it('süre saat ve dakikayla yazılır', () => {
+    expect(formatMinutes(45)).toBe('45 dk');
+    expect(formatMinutes(120)).toBe('2 sa');
+    expect(formatMinutes(85)).toBe('1 sa 25 dk');
+    expect(formatMinutes(-5)).toBe('0 dk');
   });
 });

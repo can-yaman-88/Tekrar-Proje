@@ -28,7 +28,7 @@ export function useWeekScreen() {
   const weekStart = useMemo(() => addDays(weekStartOf(today), weekOffset * 7), [today, weekOffset]);
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const query = useWeekTasks(weekStart, weekEnd);
-  const { toggle, pendingTaskId } = useToggleTaskStatus(todayLocal());
+  const { toggle, pendingTaskId, rating } = useToggleTaskStatus(todayLocal());
 
   const tasks = useMemo(() => query.data ?? [], [query.data]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
@@ -90,5 +90,6 @@ export function useWeekScreen() {
     },
     onPressTask: (taskId: string) => router.push(`/task/${taskId}`),
     pendingTaskId,
+    rating,
   };
 }

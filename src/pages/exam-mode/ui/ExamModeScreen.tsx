@@ -2,17 +2,13 @@ import { useLearnedCapacity } from '@features/capacity';
 import { useExamModeScreen } from '@features/exam-mode';
 import { AppText, Button, Card, EmptyState, ErrorState, Screen, Skeleton, TextField, makeStyles } from '@shared/ui';
 import { useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 
 export function ExamModeScreen() {
   const { examId } = useLocalSearchParams<{ examId: string }>();
-  const capacity = useLearnedCapacity();
-  const capacityByWeekday = useMemo(
-    () => Object.fromEntries(capacity.rows.map((row) => [row.weekday, row.minutes])),
-    [capacity.rows],
-  );
-  const vm = useExamModeScreen(examId, { capacityByWeekday });
+  // The same per-day budget the weekly planner fills, class hours included.
+  const { budgetByWeekday } = useLearnedCapacity();
+  const vm = useExamModeScreen(examId, { capacityByWeekday: budgetByWeekday });
   const styles = useStyles();
 
   if (vm.error) {

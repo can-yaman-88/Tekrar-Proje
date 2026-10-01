@@ -12,14 +12,17 @@ import {
   type TaskGroup,
 } from '@entities/task';
 import { useSessionsSince } from '@entities/task-session';
+import { useReviewRadar } from '@entities/topic';
 import { useLearnedCapacity } from '@features/capacity';
 import { planDeadlineWork, WINDOW_DAYS, type DayBudget, type DeadlineTask } from '@domain/workload';
 import {
   useBannerStore,
   useExamReminderSync,
+  useReviewReminderSync,
   useSmartReminderSync,
   useWeeklySummaryReminder,
 } from '@features/reminders';
+import { useEnsureReviewTasks } from '@features/review-cycle';
 import { useToggleTaskStatus } from '@features/task-toggle-status';
 import { useQueuedChangeCount } from '@shared/api/query';
 import { addDays, diffInDays, formatLongDate, formatShortDate, useToday } from '@shared/lib/date';
@@ -41,7 +44,7 @@ export function useMissionScreen() {
   const today = useToday();
   const tasksQuery = useMissionTasks(today);
   const examsQuery = useUpcomingExams(today);
-  const { toggle, pendingTaskId } = useToggleTaskStatus(today);
+  const { toggle, pendingTaskId, rating } = useToggleTaskStatus(today);
   const lastCheckin = useLastCheckinDate();
   const [isPullRefreshing, setPullRefreshing] = useState(false);
   const [filter, setFilter] = useState<TaskGroupFilterValue>('all');
@@ -56,6 +59,7 @@ export function useMissionScreen() {
   useExamReminderSync(exams);
   useSmartReminderSync();
   useWeeklySummaryReminder();
+  useReviewReminderSync();
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
 
   // What the days ahead already hold, so a homework's share is carved out of
@@ -63,7 +67,8 @@ export function useMissionScreen() {
   const horizonEnd = useMemo(() => addDays(today, WINDOW_DAYS), [today]);
   const weekTasks = useWeekTasks(today, horizonEnd);
   const sessions = useSessionsSince(useMemo(() => addDays(today, -30), [today]));
-  const capacity = useLearnedCapacity();
+  // The same per-day budget the weekly planner fills, class hours included.
+  const { budgetByWeekday } = useLearnedCapacity();
 
   const workload = useMemo(
     () =>
@@ -73,10 +78,27 @@ export function useMissionScreen() {
         board: tasks,
         scheduled: weekTasks.data ?? [],
         measuredMinutes: measuredByTask(sessions.data ?? []),
-        capacityByWeekday: Object.fromEntries(capacity.rows.map((row) => [row.weekday, row.minutes])),
+        capacityByWeekday: budgetByWeekday,
       }),
-    [capacity.rows, horizonEnd, sessions.data, tasks, today, weekTasks.data],
+    [budgetByWeekday, horizonEnd, sessions.data, tasks, today, weekTasks.data],
   );
+
+  // A review that comes due today lands on today's board, within what is left
+  // of today's budget — not on next Monday's plan.
+  const radar = useReviewRadar();
+  const dueReviews = useMemo(
+    () => (radar.data ?? []).filter((topic) => topic.nextReviewOn !== null && topic.nextReviewOn <= today).length,
+    [radar.data, today],
+  );
+  const freeToday = useMemo(() => {
+    if (tasksQuery.data === undefined) return null;
+    const booked = tasks
+      .filter((task) => task.dueDate <= today && isOpenTask(task) && !isDeadlineWork(task, today))
+      .reduce((total, task) => total + (task.estimatedMinutes ?? 0), 0);
+    const homework = [...workload.shares.values()].reduce((total, share) => total + share.minutes, 0);
+    return (budgetByWeekday[isoWeekday(today)] ?? 0) - booked - homework;
+  }, [budgetByWeekday, tasks, tasksQuery.data, today, workload.shares]);
+  useEnsureReviewTasks(today, dueReviews, freeToday);
 
   // Two rules decide what the board shows: homework with no share today is
   // work for another day, and a step is shown inside its parent rather than
@@ -190,6 +212,7 @@ export function useMissionScreen() {
       onPressTask: (taskId: string) => router.push(`/task/${taskId}`),
       pendingTaskId,
     },
+    rating,
     offline:
       isOnline && queuedChanges === 0
         ? null

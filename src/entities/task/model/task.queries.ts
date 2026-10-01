@@ -38,3 +38,19 @@ export function useMissionTasks(today: IsoDate) {
     queryFn: () => taskRepository.listMission(today),
   });
 }
+
+/** Every task of one topic — the topic screen's own list. */
+export function useTopicTasks(topicId: string) {
+  return useQuery({
+    queryKey: taskKeys.forTopic(topicId),
+    queryFn: () => taskRepository.listForTopic(topicId),
+  });
+}
+
+/** Finished work since a day, for the capacity learner. */
+export function useCompletedSince(since: IsoDate) {
+  return useQuery({
+    queryKey: taskKeys.completedSince(since),
+    queryFn: () => taskRepository.listCompletedSince(since),
+  });
+}

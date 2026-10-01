@@ -1,1 +1,6 @@
-export { useToggleTaskStatus } from './model/useToggleTaskStatus';
+export {
+  runToggle,
+  statusForRating,
+  useToggleTaskStatus,
+  type ToggleVariables,
+} from './model/useToggleTaskStatus';

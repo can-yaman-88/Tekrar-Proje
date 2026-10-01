@@ -9,6 +9,7 @@
 // alone: laboratory hours and school quizzes. Neither produces work, and
 // neither steers the schedule.
 import type { ExamKind, IsoDate, StudyStep, TaskType } from '../_shared/contracts/enums.contract.ts';
+import { type CapacitySource, DEFAULT_DAILY_CAPACITY, planningBudget } from '../_shared/domain/capacity.ts';
 import { addDays, diffInDays } from '../_shared/domain/dates.ts';
 import { planDeadlineWork } from '../_shared/domain/workload.ts';
 import {
@@ -92,6 +93,14 @@ export interface PlanInput {
   courseClassDays?: CourseClassDays;
   /** Minutes of study per ISO weekday, learned from what the student finishes. */
   capacityByWeekday?: Readonly<Record<number, number>>;
+  /**
+   * Where each weekday's number came from. A learned or hand-set budget is the
+   * student's real day, classes included, so class hours are not taken off it
+   * a second time. Weekdays without a source are treated as a guess.
+   */
+  capacitySources?: Readonly<Record<number, CapacitySource>>;
+  /** Days the student never studies on: no work lands there, whatever else says so. */
+  blockedWeekdays?: readonly number[];
   /** Flat fallback for weekdays with no history. */
   dailyCapacityMinutes?: number;
 }
@@ -104,10 +113,6 @@ export interface PlanResult {
 }
 
 const DAYS = 7;
-import { DEFAULT_DAILY_CAPACITY } from '../_shared/domain/capacity.ts';
-/** A class hour costs this share of the day's study budget. */
-const CLASS_MINUTE_COST = 0.5;
-const MIN_DAILY_CAPACITY = 30;
 const MAX_TOPICS_PER_WEEK = 10;
 /** Concept page, quiz, Feynman page, and the optional harder set. */
 const MAX_STEPS_PER_TOPIC = 4;
@@ -214,6 +219,8 @@ export function planWeek({
   classLoad,
   courseClassDays,
   capacityByWeekday,
+  capacitySources,
+  blockedWeekdays = [],
   dailyCapacityMinutes,
 }: PlanInput): PlanResult {
   const fallbackCapacity = dailyCapacityMinutes ?? DEFAULT_DAILY_CAPACITY;
@@ -234,21 +241,29 @@ export function planWeek({
     return { weekStart, weekEnd, slots: [], notes };
   }
 
-  // Exam days are for sitting the exam, not for new work.
+  // Exam days are for sitting the exam, not for new work — and a day the
+  // student has closed is worth nothing. It used to be floored back up to half
+  // an hour, so "pazarları çalışamam" still got Sunday work from the planner.
   const examDays = new Set(plannedExams.map((exam) => exam.examDate));
-  const days = Array.from({ length: DAYS }, (_, i) => addDays(weekStart, i)).filter((day) => !examDays.has(day));
+  const closed = new Set(blockedWeekdays);
+  const isClosed = (day: IsoDate) =>
+    closed.has(isoWeekday(day)) || (capacityByWeekday !== undefined && capacityByWeekday[isoWeekday(day)] === 0);
+  const days = Array.from({ length: DAYS }, (_, i) => addDays(weekStart, i)).filter(
+    (day) => !examDays.has(day) && !isClosed(day),
+  );
   if (days.length === 0) {
-    notes.push('Bu hafta tamamı sınav günü; plan oluşturulmadı.');
+    notes.push('Bu haftanın bütün günleri sınav günü ya da kapalı; plan oluşturulmadı.');
     return { weekStart, weekEnd, slots: [], notes };
   }
 
-  // Class hours (labs included) eat into the day's study budget.
+  // Class hours (labs included) eat into a budget that is only a guess; a
+  // learned or hand-set day already is the student's real day.
   const remaining = new Map(
     days.map((day) => {
       const weekday = isoWeekday(day);
-      const budget = capacityByWeekday?.[weekday] ?? fallbackCapacity;
-      const classMinutes = classLoad?.[weekday] ?? 0;
-      return [day, Math.max(MIN_DAILY_CAPACITY, Math.round(budget - classMinutes * CLASS_MINUTE_COST))];
+      const minutes = capacityByWeekday?.[weekday] ?? fallbackCapacity;
+      const source = capacitySources?.[weekday] ?? 'default';
+      return [day, planningBudget({ minutes, source }, classLoad?.[weekday] ?? 0)];
     }),
   );
 
@@ -302,6 +317,14 @@ export function planWeek({
       if (!SAME_DAY_PAIR.includes(step)) batches.push([step]);
     }
 
+    // A review is a recall test after a gap: doing it before the day it is due
+    // only shortens the gap. It waits for that day (an overdue one goes first).
+    const notBefore =
+      plan.isReview && plan.topic.nextReviewOn !== null && plan.topic.nextReviewOn > weekStart
+        ? days.findIndex((day) => day >= (plan.topic.nextReviewOn as IsoDate))
+        : 0;
+    if (notBefore < 0) continue; // its day is closed or an exam day; the daily review job picks it up
+
     let lastIndex = -1; // steps never run backwards in time
     let cursor = 0; // round-robin across the course's own days
 
@@ -348,7 +371,7 @@ export function planWeek({
 
     for (const batch of batches) {
       const needsLaterDay = batch.some((step) => NEXT_DAY_STEPS.includes(step));
-      const minIndex = Math.max(0, lastIndex + (needsLaterDay ? 1 : 0));
+      const minIndex = Math.max(notBefore, lastIndex + (needsLaterDay ? 1 : 0));
 
       const placed = place(batch, minIndex);
       if (placed !== null) {

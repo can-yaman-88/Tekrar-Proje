@@ -19,6 +19,7 @@ export function CourseDetailScreen() {
     onDelete,
     isDeleting,
     onOpenExam,
+    onOpenTopic,
   } =
     useCourseDetailScreen(courseId);
   const styles = useStyles();
@@ -116,7 +117,7 @@ export function CourseDetailScreen() {
               Takıldığın ya da tekrar aralığı kısalan konular. Haftalık plan bunlara öncelik verir.
             </AppText>
             {view.weakTopics.map((topic) => (
-              <TopicRow key={topic.id} model={topic} />
+              <TopicRow key={topic.id} model={topic} onPress={onOpenTopic} />
             ))}
           </View>
         ) : null}
@@ -134,6 +135,7 @@ export function CourseDetailScreen() {
               <TopicRow
                 key={topic.id}
                 model={topic}
+                onPress={onOpenTopic}
                 onToggleAdvanced={onToggleAdvanced}
                 toggleDisabled={isTogglingAdvanced}
               />

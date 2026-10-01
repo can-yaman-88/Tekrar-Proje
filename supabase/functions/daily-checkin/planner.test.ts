@@ -1289,3 +1289,83 @@ Deno.test('taşınan görevin gün kararları düzenlemeden düşer', () => {
   assertEquals('starts_on' in (plan.taskEdits[0]?.fields ?? {}), false);
   assertEquals('day_allocations' in (plan.taskEdits[0]?.fields ?? {}), false);
 });
+
+Deno.test('uygulamada bugün işaretlenmiş konu akşamki raporda ikinci kez sayılmaz', () => {
+  const plan = planCheckinEffects({
+    logDate: TODAY,
+    tasks: [task('t-truss', 'top-truss')],
+    topics: [{ ...topics[0]!, nextReviewOn: TODAY, lastReviewedOn: TODAY }],
+    extraction: extraction({
+      taskOutcomes: [outcome({ taskId: 't-truss', outcome: 'completed', confidence: 4 })],
+    }),
+  });
+
+  assertEquals(plan.taskUpdates.map((u) => u.new_status), ['completed']);
+  assertEquals(plan.topicReviews, []);
+});
+
+Deno.test('aynı gün işaretlenmiş olsa bile raporda geçen başarısızlık takvimi sıfırlar', () => {
+  const plan = planCheckinEffects({
+    logDate: TODAY,
+    tasks: [task('t-truss', 'top-truss')],
+    topics: [{ ...topics[0]!, nextReviewOn: '2026-10-11', lastReviewedOn: TODAY }],
+    extraction: extraction({
+      taskOutcomes: [outcome({ taskId: 't-truss', outcome: 'failed', confidence: 1 })],
+    }),
+  });
+
+  assertEquals(plan.topicReviews.map((r) => [r.repetitions, r.interval_days, r.next_review_on]), [[0, 1, '2026-10-06']]);
+});
+
+Deno.test('vadesinden önce bitirilen iş aralığı uzatmaz, saati yeniden başlatır', () => {
+  const plan = planCheckinEffects({
+    logDate: TODAY, // 2026-10-05
+    tasks: [task('t-truss', 'top-truss')],
+    topics: [{ ...topics[0]!, nextReviewOn: '2026-10-08', lastReviewedOn: '2026-10-02' }],
+    extraction: extraction({ taskOutcomes: [outcome({ taskId: 't-truss', outcome: 'completed', confidence: 5 })] }),
+  });
+
+  const review = plan.topicReviews[0];
+  assertEquals([review?.repetitions, review?.interval_days, review?.next_review_on, review?.early], [
+    2,
+    6,
+    '2026-10-11',
+    true,
+  ]);
+});
+
+Deno.test('tekrar geçmişi için gün, güven ve isabet de taşınır', () => {
+  const plan = planCheckinEffects({
+    logDate: TODAY,
+    tasks: [task('t-carnot', 'top-carnot', { targetCount: 10 })],
+    topics,
+    extraction: extraction({
+      taskOutcomes: [
+        outcome({ taskId: 't-carnot', outcome: 'completed', problemsSolved: 10, correctCount: 8, confidence: 4, daysAgo: 2 }),
+      ],
+    }),
+  });
+
+  const review = plan.topicReviews[0];
+  assertEquals(
+    [review?.reviewed_on, review?.quality, review?.confidence, review?.correct_count, review?.attempted_count, review?.task_id],
+    ['2026-10-03', 4, 4, 8, 10, 't-carnot'],
+  );
+});
+
+Deno.test('geçmiş bir güne ait bitirilen iş o güne tarihlenir', () => {
+  const plan = planCheckinEffects({
+    logDate: TODAY,
+    tasks: [task('t-truss', 'top-truss'), task('t-carnot', 'top-carnot')],
+    topics,
+    extraction: extraction({
+      taskOutcomes: [
+        outcome({ taskId: 't-truss', outcome: 'completed', daysAgo: 3 }),
+        outcome({ taskId: 't-carnot', outcome: 'completed' }),
+      ],
+    }),
+  });
+
+  // Bugün biten iş zaten bugüne yazılır; yalnızca geçmiş gün taşınır.
+  assertEquals(plan.completionDays, [{ task_id: 't-truss', completed_on: '2026-10-02' }]);
+});

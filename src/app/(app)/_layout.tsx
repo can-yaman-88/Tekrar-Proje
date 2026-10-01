@@ -22,6 +22,7 @@ export default function AppLayout() {
       <Stack.Screen name="progress" options={{ title: 'Gidişat' }} />
       <Stack.Screen name="class-schedule" options={{ title: 'Ders programı' }} />
       <Stack.Screen name="review-radar" options={{ title: 'Tekrar radarı' }} />
+      <Stack.Screen name="topic/[topicId]" options={{ title: 'Konu' }} />
       <Stack.Screen name="checkin-history" options={{ title: 'Değerlendirmeler' }} />
       <Stack.Screen name="exam/[examId]" options={{ title: 'Sınav modu' }} />
       <Stack.Screen name="weekly-summary" options={{ title: 'Haftalık özet' }} />

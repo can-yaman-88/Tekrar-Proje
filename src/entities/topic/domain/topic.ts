@@ -7,6 +7,8 @@ export interface Topic {
   weekNumber: number | null;
   easeFactor: number;
   repetitions: number;
+  /** Days between the last counted review and the next one. */
+  intervalDays: number;
   nextReviewOn: IsoDate | null;
   lastReviewedAt: string | null;
   /** Only the student sets this; the planner refuses advanced work without it. */

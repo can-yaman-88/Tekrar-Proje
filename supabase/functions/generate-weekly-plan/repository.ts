@@ -7,14 +7,18 @@ import type { TypedClient } from '../_shared/supabase.ts';
 import type { StudyStep } from '../_shared/contracts/enums.contract.ts';
 import { FIRST_CYCLE } from './study-cycle.ts';
 import {
-  buildCapacitySamples,
-  learnDailyCapacity,
+  type CapacityProfile,
+  localDateIn,
   LOOKBACK_WEEKS,
-  type LearnedCapacity,
+  parseCapacityOverrides,
+  resolveCapacity,
 } from '../_shared/domain/capacity.ts';
 import type { ClassLoad, CourseClassDays, PlanCommitment, PlanExam, PlanSlot, PlanTopic } from './planner.ts';
 
 const RECENT_FAILURE_DAYS = 21;
+/** PostgREST returns at most this many rows per request; a term's tasks need several. */
+const PAGE_SIZE = 1000;
+const MAX_TASK_PAGES = 20;
 /** A homework with no estimate still costs something. */
 const DEFAULT_HOMEWORK_MINUTES = 45;
 const MAX_TOPICS = 300;
@@ -32,8 +36,8 @@ export interface PlanContext {
   classLoad: ClassLoad;
   /** Teaching days per course, labs excluded: the planner puts work on these. */
   courseClassDays: CourseClassDays;
-  /** Minutes the student tends to manage on each weekday. */
-  capacity: LearnedCapacity;
+  /** Minutes the student tends to manage on each weekday, and where each number came from. */
+  capacity: CapacityProfile;
   /** Homework with its own deadline, which the plan has to make room for. */
   commitments: PlanCommitment[];
 }
@@ -72,23 +76,22 @@ export class WeeklyPlanRepository {
           .gte('exam_date', weekStart)
           .order('exam_date', { ascending: true }),
         this.service.from('exam_topics').select('exam_id, topic_id').eq('user_id', this.userId),
-        this.service
-          .from('tasks')
-          .select(
-            'id, topic_id, type, status, due_date, starts_on, source, target_count, completed_count, estimated_minutes, completed_at, parent_task_id',
-          )
-          .eq('user_id', this.userId),
+        this.loadAllTasks(),
         this.service
           .from('class_sessions')
           .select('course_id, weekday, start_time, end_time, is_lab')
           .eq('user_id', this.userId),
         this.service
           .from('task_sessions')
-          .select('started_at, minutes')
+          .select('task_id, started_at, minutes')
           .eq('user_id', this.userId)
           .gte('started_at', `${addDays(weekStart, -LOOKBACK_WEEKS * 7)}T00:00:00Z`)
           .not('minutes', 'is', null),
-        this.service.from('profiles').select('blocked_weekdays').eq('id', this.userId).maybeSingle(),
+        this.service
+          .from('profiles')
+          .select('blocked_weekdays, capacity_overrides, timezone')
+          .eq('id', this.userId)
+          .maybeSingle(),
       ]);
 
     if (topicsResult.error) throw dbError('load topics', topicsResult.error);
@@ -144,31 +147,33 @@ export class WeeklyPlanRepository {
       bucket.set(task.topic_id, steps);
     }
 
-    // What the student actually finishes, day by day, over the recent past.
-    const historyStart = addDays(weekStart, -LOOKBACK_WEEKS * 7);
-    const historyDays: string[] = [];
-    for (let day = historyStart; day < weekStart; day = addDays(day, 1)) historyDays.push(day);
-
-    const estimatedSamples = tasksResult.data.flatMap((task) => {
-      if (task.status !== 'completed' || !task.completed_at) return [];
-      const finishedOn = task.completed_at.slice(0, 10);
-      if (finishedOn < historyStart || finishedOn >= weekStart) return [];
-      return [{ date: finishedOn, minutes: task.estimated_minutes ?? 0 }];
+    // What the student actually does, day by day, over the recent past — on
+    // their own calendar, with their own numbers and closed days on top. The
+    // app's capacity card runs the same function on the same rows.
+    const timeZone = profileResult.data?.timezone ?? 'UTC';
+    const capacity = resolveCapacity({
+      today: weekStart,
+      finished: tasksResult.data.flatMap((task) =>
+        task.status === 'completed' && task.completed_at
+          ? [
+              {
+                taskId: task.id,
+                parentTaskId: task.parent_task_id,
+                finishedOn: localDateIn(task.completed_at, timeZone),
+                estimatedMinutes: task.estimated_minutes,
+              },
+            ]
+          : [],
+      ),
+      timed: (sessionsResult.data ?? []).flatMap((session) =>
+        session.minutes === null
+          ? []
+          : [{ taskId: session.task_id, startedOn: localDateIn(session.started_at, timeZone), minutes: session.minutes }],
+      ),
+      // "Pazarları hiç çalışamam" is a fact about the week, not a bad average.
+      blockedWeekdays: (profileResult.data?.blocked_weekdays ?? []).filter((day) => day >= 1 && day <= 7),
+      overrides: parseCapacityOverrides(profileResult.data?.capacity_overrides),
     });
-    // Stopwatch readings beat estimates on the days they cover.
-    const measuredSamples = (sessionsResult.data ?? []).flatMap((session) => {
-      if (session.minutes === null) return [];
-      const day = session.started_at.slice(0, 10);
-      if (day < historyStart || day >= weekStart) return [];
-      return [{ date: day, minutes: session.minutes }];
-    });
-    const { samples: capacitySamples } = buildCapacitySamples(measuredSamples, estimatedSamples);
-    const capacity = learnDailyCapacity(capacitySamples, historyDays);
-    // Days the student has closed are worth nothing, whatever the history says:
-    // "pazarları hiç çalışamam" is a fact about the week, not a bad average.
-    for (const weekday of profileResult.data?.blocked_weekdays ?? []) {
-      if (weekday >= 1 && weekday <= 7) capacity.minutesByWeekday[weekday] = 0;
-    }
 
     // The timetable: how busy each weekday is, and which days teach which course.
     // Lab hours count as busy time but never as a teaching day — the student
@@ -244,6 +249,29 @@ export class WeeklyPlanRepository {
         topicIds: topicsByExam.get(e.id) ?? [],
       })),
     };
+  }
+
+  /**
+   * Every task the student has, page by page. A single request stops at a
+   * thousand rows, and a term passes that — silently, which made finished
+   * topics look untouched and planned them all over again.
+   */
+  private async loadAllTasks() {
+    const rows = [];
+    for (let page = 0; page < MAX_TASK_PAGES; page++) {
+      const { data, error } = await this.service
+        .from('tasks')
+        .select(
+          'id, topic_id, type, status, due_date, starts_on, source, target_count, completed_count, estimated_minutes, completed_at, parent_task_id',
+        )
+        .eq('user_id', this.userId)
+        .order('id', { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (error) return { data: null, error };
+      rows.push(...data);
+      if (data.length < PAGE_SIZE) break;
+    }
+    return { data: rows, error: null };
   }
 
   async apply(

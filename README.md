@@ -134,18 +134,32 @@ Kısayol: `npm run apk` (barındırılan proje, `.env.production`) veya
 tek seferlik: `configure_weekly_plan_cron(url, service_key)` fonksiyonunu servis anahtarıyla
 çağırmak yeterli — anahtar Vault'ta saklanır, cron komutunda görünmez.
 
-**Günlük bütçe ölçülür, varsayılmaz.** Son 6 haftada gerçekten tamamladığın işin süresi gün
-gün ortalanır: pazartesi 45 dakika, cumartesi 180 dakika gibi. Plan her günü kendi bütçesine
-göre doldurur; veri biriktikçe sana yaklaşır. Ayarlar'daki **Günlük çalışma kapasiten** kartı
-bu ölçümü gösterir (turuncu çubuklar henüz ölçülmemiş günler).
+**Günlük bütçe ölçülür, varsayılmaz.** Son 6 haftada gerçekten yaptığın iş gün gün ortalanır:
+pazartesi 45 dakika, cumartesi 180 dakika gibi. Plan her günü kendi bütçesine göre doldurur.
+Hesap bütün planlayıcılarda (uygulama, haftalık plan, değerlendirme) aynı fonksiyondan geçer
+(`_shared/domain/capacity.ts → resolveCapacity`), bu yüzden kart ile plan hiçbir zaman ayrışmaz:
+
+- Geçmiş, **ilk çalıştığın günden** başlar; uygulamayı kullanmadan önceki haftalar sıfır sayılmaz.
+- Son haftalar eski haftalardan daha ağır basar (haftalık 0,85 azalma).
+- Süre tuttuğun görev gerçek dakikasıyla, tutmadığın görev tahminiyle sayılır — aynı saat iki kez
+  sayılmaz; alt adımlı ödevin kapsayıcısı ayrıca sayılmaz; tahmini olmayan iş 30 dk sayılır.
+- Günler senin saat diliminle hesaplanır (uygulama telefonun saat dilimini profile yazar);
+  "pazartesi şunu bitirdim" diye geriye dönük bildirdiğin iş o güne tarihlenir.
+- Yeterince görülmemiş gün uydurma 120 dakikayı değil, **genel temponu** alır.
+- Ders saati yalnızca tahmini bütçeden düşülür; öğrenilmiş bir gün zaten derslerinle birlikte
+  yaşadığın gerçek gündür.
+
+Ayarlar'daki **Günlük çalışma kapasiten** kartı her günün sayısını ve nereden geldiğini gösterir
+(öğrenildi / senin sayın / genel tempon / varsayılan / kapalı). Bir güne dokunup **Otomatik ·
+Elle · Kapalı** seçebilirsin: elle girdiğin dakika (15–600) bütün planlayıcılarda geçerlidir.
 
 **Ara verdiğin günler tek raporla kapanır.** Birkaç gün değerlendirme yazmadıysan Görevler
 ekranında bir şerit çıkar. Tek metinde birden çok günü anlatabilirsin ("pazartesi kafesleri
 bitirdim, salı hiç çalışamadım, dün Carnot'ta takıldım"); her cümle kendi gününe yazılır ve
 tekrar takvimi işin gerçekten yapıldığı güne göre kurulur.
 
-**Tekrar radarı** (Dersler → Tekrar radarı): tekrar zamanı gelenler, bu hafta sırada olanlar,
-zayıflayanlar ve hiç çalışılmamışlar tek ekranda.
+**Tekrar radarı** (Defter → Tekrarlar → Bütün konular): tekrar zamanı gelenler, bu hafta sırada
+olanlar, zayıflayanlar ve hiç çalışılmamışlar tek ekranda. Her satır konunun kendi ekranını açar.
 
 **Hatırlatma saati de öğrenilir.** Ayarlar → Hatırlatmalar → "Saati kendi öğrensin" açıkken
 uygulama, zamanlayıcıyla ölçülen oturumların bittiği saate bakar ve her gün için ayrı bir
@@ -252,11 +266,41 @@ hüküm cümlesi:
 Hız son üç haftanın ölçümüdür — en az iki biten konu yoksa **uydurulmaz**, "yeterli geçmiş yok"
 denir. Geride olan ders listenin başına çıkar.
 
+## Tekrar döngüsü
+
+Bir konunun aralıklı tekrar takvimi (SM-2) artık yalnızca değerlendirmeyle değil, **uygulamada
+görevi bitirdiğinde** de ilerler (`set_task_status`). Tiki geri alırsan o tekrar da geri alınır.
+Kurallar uygulamada ve değerlendirmede aynıdır (`scheduleReview` / `apply_topic_review`):
+
+- Bir konu günde **bir kez** sayılır; aynı gün akşamki rapor öğleden sonraki tiki ikinci kez saymaz.
+  Başarısızlık ise her zaman sayılır.
+- Vadesinden **önce** yapılan çalışma aralığı uzatmaz, saati yeniden başlatır.
+- Takılırsan (ya da 1 puan verirsen) konu ertesi gün geri gelir.
+
+Tekrar günü gelen konu kendiliğinden **Görevler** ekranına düşer: döngüsü bitmiş konuya Feynman
+sayfası, ertesi gün sınav; yarım kalmış konuya döngünün sıradaki adımı. Her takvim tarihi için
+bir kez üretilir, günün kalan bütçesi gözetilir, kapalı güne konmaz. Haftalık plan da tekrarı
+vadesinden önceki bir güne koymaz.
+
+Tekrar görevini bitirirken **"Nasıl geçti?"** diye 1–5 sorulur; bu puan konunun son güven
+puanıdır. Ayarlar → Hatırlatmalar → **Tekrar zamanı** açıksa tekrar günü bildirim gelir.
+
+Her sayılan tekrar `topic_review_events` tablosuna yazılır (gün, kaynak, kalite, güven, isabet,
+aralığın önceki ve sonraki hali). Bir konuya dokunduğunda **konu ekranı** açılır: sıradaki tekrar,
+son çalışma, son güven puanı, son isabet, aralık / başarılı tekrar / kolaylık, bütün tekrar
+geçmişi, takıldığın yerler ve konunun görevleri. Görev olmadan çalıştıysan **Bugün tekrar
+ettim** ile kaydedersin. Değerlendirme sonucu da hangi konunun hangi güne yazıldığını söyler.
+
 ## Defter sekmesi
 
-Alt sekmelerden biri **Defter**: üstte yakın günlerde tekrarı gelen konular, altında bütün
-hata defteri ders › konu olarak gruplanmış halde. Filtre çipleriyle açık / çözülen / hepsi
-arasında geçiş yaparsın, madde satırından "Çözüldü" dersin.
+Alt sekmelerden biri **Defter**, iki bölümlü:
+
+- **Tekrarlar**: geciken / bugün / bu hafta sayıları; konular gün gün, her birinde son çalışma,
+  son güven, isabet ve aralığın ne kadarının geçtiği. Bildirimler kapalıysa açmayı önerir.
+- **Takıldığım yerler**: ders › konu olarak gruplanmış hata defteri. Açık / çözülen / hepsi
+  filtresi, arama ve ders çipleri; her maddede kayıt günü, nereden geldiği ve hangi görevde
+  takıldığın. **✓ Çözdüm** bildirimdeki **Geri al** ile geri alınır, çözülen madde **Geri aç**
+  ile yeniden açılır; basılı tutunca düzenleme ve silme. Bir konuya elle madde eklenebilir.
 
 **Dersler** artık alt sekmede değil — dönemde birkaç kez gerektiği için **Ayarlar → Dersler ve
 izlence** altında. Ders ekleme, izlence yükleme, ders programı ve tekrar radarı oradan açılır.
@@ -377,8 +421,9 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 45 pgTAP testi
-  bunu kanıtlar (`supabase/tests/rls.test.sql`).
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 74 pgTAP testi
+  bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
+  satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
 - Alt tablolar ana tabloya iki sütunlu (id + user_id) yabancı anahtarla bağlıdır: başka bir
   kullanıcının verisine bağlanmak veritabanı düzeyinde imkânsızdır.
 - Oturum anahtarları ve önbelleğe alınmış veriler cihazda şifreli saklanır; şifreleme anahtarı

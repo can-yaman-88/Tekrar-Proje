@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { installAppLifecycle } from '../bootstrap/lifecycle';
 import { registerMutationDefaults } from '../bootstrap/mutationDefaults';
 import { useAuthListener } from '../bootstrap/useAuthListener';
+import { useTimezoneSync } from '../bootstrap/useTimezoneSync';
 import { QueryProvider } from './QueryProvider';
 
 installAppLifecycle();
@@ -14,6 +15,7 @@ configureNotifications();
 
 function AuthBridge() {
   useAuthListener();
+  useTimezoneSync();
   useNotificationActions();
   return null;
 }

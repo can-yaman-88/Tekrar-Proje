@@ -1,5 +1,6 @@
-import { AppText, makeStyles, type TextTone } from '@shared/ui';
-import { Switch, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { AppText, makeStyles, useTheme, type TextTone } from '@shared/ui';
+import { Pressable, Switch, View } from 'react-native';
 import type { MasteryLevel } from '../domain/topic';
 
 export interface TopicRowModel {
@@ -9,6 +10,10 @@ export interface TopicRowModel {
   mastery: MasteryLevel;
   masteryLabel: string;
   reviewLabel: string | null;
+  /** Shown in the warning colour when the review is due or late. */
+  reviewIsDue?: boolean;
+  /** "Son çalışma 3 gün önce · güven 4/5" — what the last review looked like. */
+  lastReviewLabel?: string | null;
   statsLabel: string | null;
   hasAdvancedMaterial: boolean;
 }
@@ -22,23 +27,37 @@ const TONE: Record<MasteryLevel, TextTone> = {
 
 export interface TopicRowProps {
   model: TopicRowModel;
+  /** Opens the topic's own screen; the row is static without it. */
+  onPress?: (topicId: string) => void;
   /** Omitted on read-only screens. */
   onToggleAdvanced?: (topicId: string, hasAdvancedMaterial: boolean) => void;
   toggleDisabled?: boolean;
 }
 
-export function TopicRow({ model, onToggleAdvanced, toggleDisabled = false }: TopicRowProps) {
+export function TopicRow({ model, onPress, onToggleAdvanced, toggleDisabled = false }: TopicRowProps) {
   const styles = useStyles();
+  const { colors } = useTheme();
   return (
-    <View style={styles.row}>
+    <Pressable
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? `${model.title} — tekrar durumu` : undefined}
+      disabled={!onPress}
+      onPress={() => onPress?.(model.id)}
+      style={({ pressed }) => [styles.row, pressed && onPress ? styles.pressed : null]}
+    >
       <View style={styles.main}>
         <AppText variant="caption" tone="muted">
           {[model.weekLabel, model.statsLabel].filter(Boolean).join(' · ') || ' '}
         </AppText>
         <AppText numberOfLines={2}>{model.title}</AppText>
         {model.reviewLabel ? (
-          <AppText variant="caption" tone="muted">
+          <AppText variant="caption" tone={model.reviewIsDue ? 'warning' : 'muted'}>
             {model.reviewLabel}
+          </AppText>
+        ) : null}
+        {model.lastReviewLabel ? (
+          <AppText variant="caption" tone="muted">
+            {model.lastReviewLabel}
           </AppText>
         ) : null}
       </View>
@@ -60,9 +79,11 @@ export function TopicRow({ model, onToggleAdvanced, toggleDisabled = false }: To
               onValueChange={(value) => onToggleAdvanced(model.id, value)}
             />
           </View>
+        ) : onPress ? (
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
         ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -77,6 +98,7 @@ const useStyles = makeStyles(({ colors, radii, spacing }) => ({
     borderRadius: radii.md,
     padding: spacing.md,
   },
+  pressed: { opacity: 0.85 },
   main: { flex: 1, gap: spacing.xxs },
   side: { alignItems: 'flex-end', gap: spacing.xs },
   badge: {

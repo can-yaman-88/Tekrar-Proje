@@ -1,4 +1,5 @@
 import type { DailyCheckinResponse } from '@contracts/daily-checkin.contract';
+import { formatRelativeDay, formatShortDate, todayLocal } from '@shared/lib/date';
 import { AppText, Button, Card, makeStyles } from '@shared/ui';
 import { View } from 'react-native';
 
@@ -42,6 +43,26 @@ export function CheckInResult({ result, onDone }: CheckInResultProps) {
         ))}
       </View>
 
+      {result.scheduledReviews.length > 0 ? (
+        <Card style={styles.summary}>
+          <AppText variant="label">Tekrar takvimine yazıldı</AppText>
+          {result.scheduledReviews.map((review) => (
+            <View key={review.topicId} style={styles.reviewRow}>
+              <AppText variant="caption" style={styles.reviewTitle} numberOfLines={1}>
+                {review.topicTitle || 'Konu'}
+              </AppText>
+              <AppText variant="caption" tone="muted">
+                {formatShortDate(review.nextReviewOn)} · {formatRelativeDay(review.nextReviewOn, todayLocal())}
+                {review.early ? ' (erken tekrar: aralık korunur)' : ` (${review.intervalDays} gün)`}
+              </AppText>
+            </View>
+          ))}
+          <AppText variant="caption" tone="muted">
+            O gün geldiğinde tekrar görevi Görevler ekranına kendiliğinden düşer.
+          </AppText>
+        </Card>
+      ) : null}
+
       {result.mistakesRecorded > 0 ? (
         <Card style={styles.summary}>
           <AppText variant="caption" tone="muted">
@@ -82,6 +103,8 @@ export function CheckInResult({ result, onDone }: CheckInResultProps) {
 const useStyles = makeStyles(({ spacing }) => ({
   container: { gap: spacing.md },
   summary: { gap: spacing.xs },
+  reviewRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  reviewTitle: { flex: 1 },
   stats: { flexDirection: 'row', gap: spacing.sm },
   stat: { flex: 1, alignItems: 'center', gap: spacing.xxs, paddingHorizontal: spacing.sm },
 }));

@@ -36,8 +36,9 @@ export function ReviewRadarScreen() {
         contentContainerStyle={styles.content}
         ListHeaderComponent={
           <AppText tone="muted" style={styles.intro}>
-            Unutulmak üzere olanı gösterir. Tekrar zamanı gelen konular haftalık planda Feynman sayfası
-            ve sınav olarak karşına çıkar.
+            Unutulmak üzere olanı gösterir. Tekrar günü gelen konunun görevi o gün Görevler ekranına düşer
+            (Feynman sayfası, ertesi gün sınav). Bir konuya dokun: ne zaman çalıştığını, güven puanını ve
+            bütün tekrar geçmişini gör.
           </AppText>
         }
         ListEmptyComponent={
@@ -62,7 +63,7 @@ export function ReviewRadarScreen() {
             </AppText>
           </View>
         )}
-        renderItem={({ item }) => <TopicRow model={item} />}
+        renderItem={({ item }) => <TopicRow model={item} onPress={vm.onOpenTopic} />}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         stickySectionHeadersEnabled={false}
         refreshControl={

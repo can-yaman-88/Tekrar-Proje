@@ -28,6 +28,7 @@ const toRowModel = (topic: Topic, today: string): TopicRowModel => {
       : topic.nextReviewOn <= today
         ? 'Tekrar zamanı geldi'
         : `Tekrar: ${formatShortDate(topic.nextReviewOn)} (${diffInDays(today, topic.nextReviewOn)} gün)`;
+  const reviewIsDue = topic.nextReviewOn !== null && topic.nextReviewOn <= today;
 
   return {
     id: topic.id,
@@ -36,6 +37,7 @@ const toRowModel = (topic: Topic, today: string): TopicRowModel => {
     mastery,
     masteryLabel: MASTERY_LABEL[mastery],
     reviewLabel,
+    reviewIsDue,
     statsLabel: stats.join(' · ') || null,
     hasAdvancedMaterial: topic.hasAdvancedMaterial,
   };
@@ -89,6 +91,7 @@ export function useCourseDetailScreen(courseId: string) {
     view,
     examEditor,
     onOpenExam: (examId: string) => router.push(`/exam/${examId}`),
+    onOpenTopic: (topicId: string) => router.push(`/topic/${topicId}`),
     onToggleAdvanced: (topicId: string, hasAdvancedMaterial: boolean) =>
       advancedMaterial.mutate({ topicId, hasAdvancedMaterial }),
     isTogglingAdvanced: advancedMaterial.isPending,

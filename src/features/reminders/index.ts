@@ -4,7 +4,14 @@ export { learnReminderHours, toStudyMoment, type LearnedReminder } from './domai
 export { useNotificationActions } from './model/useNotificationActions';
 export { useSmartReminderSync } from './model/useSmartReminderSync';
 export { useWeeklySummaryReminder } from './model/useWeeklySummaryReminder';
-export { REMINDER_HOURS, useRemindersStore, type ReminderHour } from './model/reminders.store';
+export {
+  REMINDER_HOURS,
+  REVIEW_HOURS,
+  useRemindersStore,
+  type ReminderHour,
+  type ReviewHour,
+} from './model/reminders.store';
+export { useReviewReminderSync } from './model/useReviewReminderSync';
 export { useExamReminderSync } from './model/useExamReminderSync';
 export { useReminders, type RemindersController } from './model/useReminders';
 export { ReminderSettingsCard } from './ui/ReminderSettingsCard';

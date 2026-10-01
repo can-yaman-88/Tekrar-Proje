@@ -35,6 +35,8 @@ export interface TopicReview {
   interval_days: number;
   repetitions: number;
   next_review_on: IsoDate;
+  /** Written into the topic's review history next to the schedule change. */
+  quality: RecallQuality;
 }
 
 export function buildExamReviews(
@@ -58,6 +60,7 @@ export function buildExamReviews(
       interval_days: next.intervalDays,
       repetitions: next.repetitions,
       next_review_on: addDays(today, next.intervalDays),
+      quality,
     };
   });
 }

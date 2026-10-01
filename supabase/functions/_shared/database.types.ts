@@ -554,6 +554,7 @@ export type Database = {
         Row: {
           auto_weekly_plan: boolean
           blocked_weekdays: number[]
+          capacity_overrides: Json
           created_at: string
           display_name: string | null
           id: string
@@ -566,6 +567,7 @@ export type Database = {
         Insert: {
           auto_weekly_plan?: boolean
           blocked_weekdays?: number[]
+          capacity_overrides?: Json
           created_at?: string
           display_name?: string | null
           id: string
@@ -578,6 +580,7 @@ export type Database = {
         Update: {
           auto_weekly_plan?: boolean
           blocked_weekdays?: number[]
+          capacity_overrides?: Json
           created_at?: string
           display_name?: string | null
           id?: string
@@ -949,6 +952,120 @@ export type Database = {
           },
         ]
       }
+      topic_review_events: {
+        Row: {
+          attempted_count: number | null
+          confidence: number | null
+          correct_count: number | null
+          created_at: string
+          daily_log_id: string | null
+          ease_after: number
+          ease_before: number
+          exam_id: string | null
+          id: string
+          interval_after: number
+          interval_before: number
+          last_reviewed_before: string | null
+          next_review_before: string | null
+          next_review_on: string | null
+          quality: number
+          repetitions_after: number
+          repetitions_before: number
+          reviewed_on: string
+          source: string
+          task_id: string | null
+          topic_id: string
+          user_id: string
+          was_early: boolean
+        }
+        Insert: {
+          attempted_count?: number | null
+          confidence?: number | null
+          correct_count?: number | null
+          created_at?: string
+          daily_log_id?: string | null
+          ease_after: number
+          ease_before: number
+          exam_id?: string | null
+          id?: string
+          interval_after: number
+          interval_before: number
+          last_reviewed_before?: string | null
+          next_review_before?: string | null
+          next_review_on?: string | null
+          quality: number
+          repetitions_after: number
+          repetitions_before: number
+          reviewed_on: string
+          source: string
+          task_id?: string | null
+          topic_id: string
+          user_id: string
+          was_early?: boolean
+        }
+        Update: {
+          attempted_count?: number | null
+          confidence?: number | null
+          correct_count?: number | null
+          created_at?: string
+          daily_log_id?: string | null
+          ease_after?: number
+          ease_before?: number
+          exam_id?: string | null
+          id?: string
+          interval_after?: number
+          interval_before?: number
+          last_reviewed_before?: string | null
+          next_review_before?: string | null
+          next_review_on?: string | null
+          quality?: number
+          repetitions_after?: number
+          repetitions_before?: number
+          reviewed_on?: string
+          source?: string
+          task_id?: string | null
+          topic_id?: string
+          user_id?: string
+          was_early?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topic_review_events_exam_fk"
+            columns: ["exam_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "topic_review_events_log_fk"
+            columns: ["daily_log_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "daily_logs"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "topic_review_events_task_fk"
+            columns: ["task_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "topic_review_events_topic_fk"
+            columns: ["topic_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "topic_review_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       topics: {
         Row: {
           course_id: string
@@ -961,6 +1078,7 @@ export type Database = {
           next_review_on: string | null
           position: number
           repetitions: number
+          review_task_on: string | null
           title: string
           updated_at: string
           user_id: string
@@ -977,6 +1095,7 @@ export type Database = {
           next_review_on?: string | null
           position?: number
           repetitions?: number
+          review_task_on?: string | null
           title: string
           updated_at?: string
           user_id: string
@@ -993,6 +1112,7 @@ export type Database = {
           next_review_on?: string | null
           position?: number
           repetitions?: number
+          review_task_on?: string | null
           title?: string
           updated_at?: string
           user_id?: string
@@ -1084,6 +1204,10 @@ export type Database = {
         }
         Returns: Json
       }
+      backdate_checkin_completions: {
+        Args: { p_completions: Json; p_daily_log_id: string; p_user_id: string }
+        Returns: number
+      }
       clear_llm_api_key: { Args: never; Returns: undefined }
       configure_weekly_plan_cron: {
         Args: { p_function_url: string; p_service_key: string }
@@ -1093,11 +1217,52 @@ export type Database = {
         Args: { p_daily_log_id: string; p_revert?: boolean }
         Returns: Json
       }
+      ensure_review_tasks: {
+        Args: { p_budget_minutes?: number; p_max_topics?: number; p_today: string }
+        Returns: Json
+      }
+      is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
+      is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
       kick_off_weekly_plans: { Args: never; Returns: number }
       llm_key_secret_name: { Args: { p_user_id: string }; Returns: string }
+      log_topic_review: {
+        Args: { p_confidence: number; p_on?: string; p_topic_id: string }
+        Returns: Json
+      }
       read_llm_api_key: { Args: { p_user_id: string }; Returns: string }
+      recall_quality: {
+        Args: {
+          p_attempted: number
+          p_confidence: number
+          p_correct: number
+          p_failed: boolean
+        }
+        Returns: number
+      }
+      record_checkin_reviews: {
+        Args: { p_daily_log_id: string; p_reviews: Json; p_user_id: string }
+        Returns: number
+      }
       revert_daily_checkin: { Args: { p_daily_log_id: string }; Returns: Json }
       set_llm_api_key: { Args: { p_key: string }; Returns: Json }
+      set_task_status: {
+        Args: {
+          p_confidence?: number
+          p_on?: string
+          p_status: Database["public"]["Enums"]["task_status"]
+          p_task_id: string
+        }
+        Returns: Json
+      }
+      sm2_next: {
+        Args: {
+          p_ease: number
+          p_interval: number
+          p_quality: number
+          p_repetitions: number
+        }
+        Returns: Record<string, unknown>
+      }
     }
     Enums: {
       exam_kind: "quiz" | "midterm" | "final" | "lab" | "other"

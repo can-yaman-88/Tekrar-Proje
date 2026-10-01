@@ -3,7 +3,10 @@ export {
   addDays,
   diffInDays,
   formatLongDate,
+  formatMinutes,
+  formatRelativeDay,
   formatShortDate,
+  localDateOf,
   todayLocal,
   weekStartOf,
 } from './localDate';

@@ -1,6 +1,6 @@
 import type { IsoDate } from '@contracts/enums.contract';
 import { BaseRepository } from '@shared/api/repository';
-import { addDays } from '@shared/lib/date';
+import { addDays, todayLocal } from '@shared/lib/date';
 import type { Task, TaskPatch, TaskStatus } from '../domain/task.types';
 import { TASK_SELECT, toTask } from './task.mapper';
 
@@ -8,6 +8,21 @@ import { TASK_SELECT, toTask } from './task.mapper';
 const OVERDUE_LOOKBACK_DAYS = 14;
 /** How far ahead homework is fetched, so its daily share can be worked out. */
 const DEADLINE_LOOKAHEAD_DAYS = 7;
+
+/** A finished task, as little of it as the capacity learner needs. */
+export interface FinishedTaskRecord {
+  id: string;
+  parentTaskId: string | null;
+  completedAt: string;
+  estimatedMinutes: number | null;
+}
+
+export interface StatusChangeOptions {
+  /** The student's own calendar day; a replayed offline tap keeps the day it was made on. */
+  on?: IsoDate;
+  /** 1–5, when the student rated how it went. */
+  confidence?: number | null;
+}
 
 export class TaskRepository extends BaseRepository {
   /**
@@ -86,6 +101,56 @@ export class TaskRepository extends BaseRepository {
       this.db.from('tasks').select(TASK_SELECT).eq('id', taskId).single(),
     );
     return toTask(row);
+  }
+
+  /** Every task of one topic, newest first — the topic's own screen. */
+  async listForTopic(topicId: string, limit = 40): Promise<Task[]> {
+    const rows = await this.execute(
+      'tasks.listForTopic',
+      this.db
+        .from('tasks')
+        .select(TASK_SELECT)
+        .eq('topic_id', topicId)
+        .not('status', 'eq', 'rescheduled')
+        .order('due_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    );
+    return rows.map(toTask);
+  }
+
+  /**
+   * Everything finished since a day — the capacity learner's raw material.
+   * Paged, because six busy weeks are more than one response holds.
+   */
+  async listCompletedSince(since: IsoDate): Promise<FinishedTaskRecord[]> {
+    const PAGE = 1000;
+    const result: FinishedTaskRecord[] = [];
+    for (let page = 0; page < 5; page++) {
+      const rows = await this.execute(
+        'tasks.listCompletedSince',
+        this.db
+          .from('tasks')
+          .select('id, parent_task_id, completed_at, estimated_minutes')
+          .eq('status', 'completed')
+          // A day early: the local-calendar cut is made by the caller.
+          .gte('completed_at', `${addDays(since, -1)}T00:00:00Z`)
+          .order('completed_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(page * PAGE, (page + 1) * PAGE - 1),
+      );
+      for (const row of rows) {
+        if (row.completed_at === null) continue;
+        result.push({
+          id: row.id,
+          parentTaskId: row.parent_task_id,
+          completedAt: row.completed_at,
+          estimatedMinutes: row.estimated_minutes,
+        });
+      }
+      if (rows.length < PAGE) break;
+    }
+    return result;
   }
 
   /** Finished work, newest first — the History screen. */
@@ -216,17 +281,25 @@ export class TaskRepository extends BaseRepository {
     return rows.map(toTask);
   }
 
-  async updateStatus(taskId: string, status: TaskStatus): Promise<Task> {
-    const row = await this.execute(
+  /**
+   * Every status change the student makes goes through the database function,
+   * not a bare UPDATE: finishing (or failing) work there also counts as a
+   * review of its topic, so the spaced-repetition schedule moves with it — and
+   * taking the tick back takes the review back.
+   */
+  async updateStatus(taskId: string, status: TaskStatus, options: StatusChangeOptions = {}): Promise<Task> {
+    await this.execute(
       'tasks.updateStatus',
-      this.db
-        .from('tasks')
-        .update({ status, completed_at: status === 'completed' ? new Date().toISOString() : null })
-        .eq('id', taskId)
-        .select(TASK_SELECT)
-        .single(),
+      this.db.rpc('set_task_status', {
+        p_task_id: taskId,
+        p_status: status,
+        p_on: options.on ?? todayLocal(),
+        ...(options.confidence === undefined || options.confidence === null
+          ? {}
+          : { p_confidence: options.confidence }),
+      }),
     );
-    return toTask(row);
+    return this.getById(taskId);
   }
 }
 

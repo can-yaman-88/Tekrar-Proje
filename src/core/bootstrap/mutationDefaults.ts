@@ -1,6 +1,7 @@
-import { nextStatusOnToggle, taskMutationKeys, taskRepository, type Task, type TaskPatch, type TaskStatus } from '@entities/task';
+import { taskMutationKeys, taskRepository, type TaskPatch, type TaskStatus } from '@entities/task';
 import { taskNoteMutationKeys, taskNoteRepository } from '@entities/task-note';
 import { taskSessionMutationKeys, taskSessionRepository } from '@entities/task-session';
+import { runToggle } from '@features/task-toggle-status';
 import { queryClient } from '@shared/api/query';
 
 export interface UpdateTaskVariables {
@@ -35,9 +36,7 @@ export interface LogSessionVariables {
  * when connectivity returns.
  */
 export function registerMutationDefaults(): void {
-  queryClient.setMutationDefaults(taskMutationKeys.toggle, {
-    mutationFn: (task: Task) => taskRepository.updateStatus(task.id, nextStatusOnToggle(task)),
-  });
+  queryClient.setMutationDefaults(taskMutationKeys.toggle, { mutationFn: runToggle });
   queryClient.setMutationDefaults(taskMutationKeys.update, {
     mutationFn: ({ taskId, patch }: UpdateTaskVariables) => taskRepository.update(taskId, patch),
   });

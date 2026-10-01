@@ -3,10 +3,17 @@ import { showToast } from '@shared/lib/toast';
 import {
   cancelCheckinReminder,
   cancelExamReminders,
+  cancelReviewReminders,
   ensurePermission,
   registerNotificationCategories,
 } from '../data/notifications';
-import { REMINDER_HOURS, useRemindersStore, type ReminderHour } from './reminders.store';
+import {
+  REMINDER_HOURS,
+  REVIEW_HOURS,
+  useRemindersStore,
+  type ReminderHour,
+  type ReviewHour,
+} from './reminders.store';
 
 /** Settings-screen controller: permission handling plus scheduling. */
 export function useReminders() {
@@ -19,8 +26,10 @@ export function useReminders() {
       smart: boolean;
       exams: boolean;
       summary: boolean;
+      reviews: boolean;
+      reviewHour: ReviewHour;
     }) => {
-      if ((next.checkin || next.exams || next.summary) && !(await ensurePermission())) {
+      if ((next.checkin || next.exams || next.summary || next.reviews) && !(await ensurePermission())) {
         throw new Error('Bildirim izni verilmedi. Telefon ayarlarından açabilirsin.');
       }
       await registerNotificationCategories();
@@ -29,6 +38,7 @@ export function useReminders() {
       // Here we only need to clear it when the student switches it off.
       if (!next.checkin) await cancelCheckinReminder();
       if (!next.exams) await cancelExamReminders();
+      if (!next.reviews) await cancelReviewReminders();
       return next;
     },
     onSuccess: (next) => {
@@ -37,6 +47,8 @@ export function useReminders() {
       state.setSmartTiming(next.smart);
       state.setExamsEnabled(next.exams);
       state.setWeeklySummaryEnabled(next.summary);
+      state.setReviewsEnabled(next.reviews);
+      state.setReviewHour(next.reviewHour);
     },
     onError: (error) => showToast(error.message, 'danger'),
   });
@@ -47,6 +59,8 @@ export function useReminders() {
     smart: state.smartTiming,
     exams: state.examsEnabled,
     summary: state.weeklySummaryEnabled,
+    reviews: state.reviewsEnabled,
+    reviewHour: state.reviewHour,
   };
 
   return {
@@ -55,13 +69,18 @@ export function useReminders() {
     smartTiming: state.smartTiming,
     examsEnabled: state.examsEnabled,
     summaryEnabled: state.weeklySummaryEnabled,
+    reviewsEnabled: state.reviewsEnabled,
+    reviewHour: state.reviewHour,
     hours: REMINDER_HOURS,
+    reviewHours: REVIEW_HOURS,
     isBusy: apply.isPending,
     setCheckinEnabled: (checkin: boolean) => apply.mutate({ ...current, checkin }),
     setCheckinHour: (hour: ReminderHour) => apply.mutate({ ...current, hour }),
     setSmartTiming: (smart: boolean) => apply.mutate({ ...current, smart }),
     setExamsEnabled: (exams: boolean) => apply.mutate({ ...current, exams }),
     setSummaryEnabled: (summary: boolean) => apply.mutate({ ...current, summary }),
+    setReviewsEnabled: (reviews: boolean) => apply.mutate({ ...current, reviews }),
+    setReviewHour: (reviewHour: ReviewHour) => apply.mutate({ ...current, reviewHour }),
   };
 }
 

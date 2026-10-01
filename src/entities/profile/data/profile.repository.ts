@@ -1,9 +1,10 @@
+import { parseCapacityOverrides } from '@domain/capacity';
 import { BaseRepository } from '@shared/api/repository';
 import { AppError } from '@shared/lib/errors';
 import type { Profile } from '../domain/profile';
 
 const PROFILE_SELECT =
-  'id, display_name, timezone, llm_model, llm_key_hint, llm_key_set_at, auto_weekly_plan, blocked_weekdays';
+  'id, display_name, timezone, llm_model, llm_key_hint, llm_key_set_at, auto_weekly_plan, blocked_weekdays, capacity_overrides';
 
 export class ProfileRepository extends BaseRepository {
   async get(): Promise<Profile> {
@@ -21,7 +22,34 @@ export class ProfileRepository extends BaseRepository {
       llmKeySetAt: row.llm_key_set_at,
       autoWeeklyPlan: row.auto_weekly_plan,
       blockedWeekdays: [...row.blocked_weekdays].sort((a, b) => a - b),
+      capacityOverrides: parseCapacityOverrides(row.capacity_overrides),
     };
+  }
+
+  /**
+   * The student's own minutes per weekday. Only sane values are sent; the
+   * database checks them again (15–600, weekdays 1–7).
+   */
+  async setCapacityOverrides(overrides: Readonly<Record<number, number>>): Promise<void> {
+    const userId = await this.requireUserId();
+    const clean: Record<string, number> = {};
+    for (const [weekday, minutes] of Object.entries(parseCapacityOverrides(overrides))) clean[weekday] = minutes;
+    await this.execute(
+      'profiles.setCapacityOverrides',
+      this.db.from('profiles').update({ capacity_overrides: clean }).eq('id', userId).select('id').single(),
+    );
+  }
+
+  /**
+   * The device's IANA timezone, so the server can tell which day a timestamp
+   * belongs to. The database refuses names it does not know.
+   */
+  async setTimezone(timezone: string): Promise<void> {
+    const userId = await this.requireUserId();
+    await this.execute(
+      'profiles.setTimezone',
+      this.db.from('profiles').update({ timezone }).eq('id', userId).select('id').single(),
+    );
   }
 
   /**

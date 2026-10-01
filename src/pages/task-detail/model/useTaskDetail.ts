@@ -7,11 +7,14 @@ import {
   useTask,
 } from '@entities/task';
 import { useTaskNotes } from '@entities/task-note';
-import { useResolveMistake, useTopicMistakes } from '@entities/topic-mistake';
+import { useTopic } from '@entities/topic';
+import { useTopicMistakes } from '@entities/topic-mistake';
+import { useMistakeActions } from '@features/mistake-book';
 import { useNoteForm } from '@features/task-note-add';
 import { useTaskTimer } from '@features/task-timer';
-import { formatLongDate, todayLocal } from '@shared/lib/date';
+import { formatLongDate, formatRelativeDay, formatShortDate, todayLocal } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
+import { useRouter } from 'expo-router';
 
 export function useTaskDetail(taskId: string) {
   const taskQuery = useTask(taskId);
@@ -19,7 +22,12 @@ export function useTaskDetail(taskId: string) {
   const task = taskQuery.data ?? null;
   // What went wrong on this topic before — read it before starting, not after.
   const mistakesQuery = useTopicMistakes(task?.topic.id ?? null);
-  const resolveMistake = useResolveMistake();
+  const mistakeActions = useMistakeActions();
+  const router = useRouter();
+  // Where the topic stands on the review schedule, one line under the title.
+  const topicQuery = useTopic(task?.topic.id ?? null);
+  const topic = task && topicQuery.data?.id === task.topic.id ? topicQuery.data : null;
+  const today = todayLocal();
 
   return {
     isLoading: taskQuery.isPending && task === null,
@@ -49,7 +57,21 @@ export function useTaskDetail(taskId: string) {
     notes: notesQuery.data ?? [],
     notesLoading: notesQuery.isPending,
     mistakes: mistakesQuery.data ?? [],
-    onResolveMistake: (mistakeId: string) => resolveMistake.mutate(mistakeId),
-    resolvingMistakeId: resolveMistake.isPending ? (resolveMistake.variables ?? null) : null,
+    onResolveMistake: mistakeActions.resolve,
+    resolvingMistakeId: mistakeActions.busyId,
+    review: task
+      ? {
+          label:
+            topic === null
+              ? 'Konunun tekrar durumu'
+              : topic.nextReviewOn === null
+                ? 'Konu henüz tekrar takviminde değil'
+                : topic.nextReviewOn <= today
+                  ? 'Konunun tekrar zamanı geldi'
+                  : `Konunun sıradaki tekrarı ${formatShortDate(topic.nextReviewOn)} (${formatRelativeDay(topic.nextReviewOn, today)})`,
+          isDue: topic !== null && topic.nextReviewOn !== null && topic.nextReviewOn <= today,
+          onOpen: () => router.push(`/topic/${task.topic.id}`),
+        }
+      : null,
   };
 }

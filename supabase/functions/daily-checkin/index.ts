@@ -99,6 +99,13 @@ Deno.serve(
         movedTaskIds: applied.movedTaskIds,
         mistakesRecorded: applied.mistakesRecorded,
         reviewedTopicIds: plan.topicReviews.map((r) => r.topic_id),
+        scheduledReviews: plan.topicReviews.map((review) => ({
+          topicId: review.topic_id,
+          topicTitle: context.topics.find((topic) => topic.id === review.topic_id)?.title ?? '',
+          nextReviewOn: review.next_review_on,
+          intervalDays: review.interval_days,
+          early: review.early,
+        })),
         unmatchedMentions: plan.unmatchedMentions,
       };
       return jsonResponse(body);

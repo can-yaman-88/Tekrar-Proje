@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(54);
+select plan(74);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -468,6 +468,145 @@ select is(
   (select count(*)::int from public.daily_log_exam_changes),
   1,
   'A sees their own exam history'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 12. The review cycle: ticking work off moves the schedule, the history is
+--     the student's alone and read-only, and nothing is counted twice.
+-- ---------------------------------------------------------------------------
+insert into public.topics (id, user_id, course_id, title) values
+  ('d0000000-0000-4000-8000-0000000000a2', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'A tekrar konusu');
+insert into public.tasks (id, user_id, topic_id, type, title, due_date) values
+  ('e0000000-0000-4000-8000-0000000000d1', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-0000000000a2', 'feynman', 'A Feynman', current_date),
+  ('e0000000-0000-4000-8000-0000000000d2', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-0000000000a2', 'quiz', 'A sınav', current_date);
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+
+select lives_ok(
+  $$select public.set_task_status('e0000000-0000-4000-8000-0000000000d1', 'completed', current_date)$$,
+  'a student can finish their own task'
+);
+select is(
+  (select repetitions || '/' || interval_days || '/' || (next_review_on - current_date)
+     from public.topics where id = 'd0000000-0000-4000-8000-0000000000a2'),
+  '1/1/1',
+  'finishing work by hand puts the topic on the review schedule'
+);
+select is(
+  (select count(*)::int from public.topic_review_events where topic_id = 'd0000000-0000-4000-8000-0000000000a2'),
+  1,
+  'the review is written into the history'
+);
+select lives_ok(
+  $$select public.set_task_status('e0000000-0000-4000-8000-0000000000d2', 'completed', current_date)$$,
+  'a second task on the same topic can be finished'
+);
+select is(
+  (select count(*)::int from public.topic_review_events where topic_id = 'd0000000-0000-4000-8000-0000000000a2'),
+  1,
+  'a topic is counted once a day, however many of its tasks are ticked'
+);
+select lives_ok(
+  $$select public.set_task_status('e0000000-0000-4000-8000-0000000000d1', 'pending', current_date)$$,
+  'a tick can be taken back'
+);
+select is(
+  (select repetitions || '/' || coalesce(next_review_on::text, '-')
+     from public.topics where id = 'd0000000-0000-4000-8000-0000000000a2'),
+  '0/-',
+  'taking the tick back restores the schedule exactly'
+);
+select throws_ok(
+  $$select public.set_task_status('e0000000-0000-4000-8000-0000000000d1', 'rescheduled')$$,
+  '22023',
+  null,
+  'only a check-in may reschedule'
+);
+select throws_ok(
+  $$insert into public.topic_review_events
+      (user_id, topic_id, reviewed_on, source, quality, ease_before, ease_after,
+       interval_before, interval_after, repetitions_before, repetitions_after)
+    values ('aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-0000000000a2',
+            current_date, 'task', 5, 2.5, 2.6, 0, 99, 0, 9)$$,
+  '42501',
+  null,
+  'the review history cannot be written by hand'
+);
+
+select lives_ok(
+  $$select public.set_task_status('e0000000-0000-4000-8000-0000000000d1', 'completed', current_date)$$,
+  'finishing it again counts again'
+);
+select lives_ok(
+  $$select public.log_topic_review('d0000000-0000-4000-8000-0000000000a2', 1::smallint, current_date)$$,
+  'a review can be logged without a task'
+);
+select is(
+  (select repetitions || '/' || interval_days from public.topics where id = 'd0000000-0000-4000-8000-0000000000a2'),
+  '0/1',
+  'a review rated 1 resets the interval, even on a day already counted'
+);
+
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select is(
+  (select count(*)::int from public.topic_review_events),
+  0,
+  'B cannot read A''s review history'
+);
+select throws_ok(
+  $$select public.set_task_status('e0000000-0000-4000-8000-0000000000d1', 'pending')$$,
+  'P0002',
+  null,
+  'B cannot change the status of A''s task'
+);
+select throws_ok(
+  $$select public.log_topic_review('d0000000-0000-4000-8000-0000000000a2', 4::smallint)$$,
+  'P0002',
+  null,
+  'B cannot log a review on A''s topic'
+);
+select throws_ok(
+  $$select public.record_checkin_reviews('bbbbbbbb-0000-4000-8000-000000000002',
+      'f0000000-0000-4000-8000-00000000000a', '[]'::jsonb)$$,
+  '42501',
+  null,
+  'the check-in review writer is server-only'
+);
+select throws_ok(
+  $$select public.apply_topic_review('bbbbbbbb-0000-4000-8000-000000000002',
+      'd0000000-0000-4000-8000-00000000000b', 5, current_date, 'task')$$,
+  '42501',
+  null,
+  'the review engine itself is not callable from the app'
+);
+reset role;
+
+-- A due review becomes work on the board — once per scheduled date.
+update public.topics set next_review_on = current_date, review_task_on = null
+ where id = 'd0000000-0000-4000-8000-0000000000a2';
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select is(
+  (select (public.ensure_review_tasks(current_date) ->> 'topics')::int),
+  1,
+  'a due review produces work'
+);
+select is(
+  (select count(*)::int from public.tasks
+    where topic_id = 'd0000000-0000-4000-8000-0000000000a2' and source = 'spaced_repetition'),
+  2,
+  'a topic whose loop is finished gets the short cycle: Feynman, then the quiz'
+);
+select is(
+  (select (public.ensure_review_tasks(current_date) ->> 'topics')::int),
+  0,
+  'asking again the same day creates nothing more'
 );
 reset role;
 

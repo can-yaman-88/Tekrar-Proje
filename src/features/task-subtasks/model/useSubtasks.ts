@@ -1,4 +1,5 @@
 import { isHomework, nextStatusOnToggle, taskKeys, taskMutationKeys, taskRepository, type Task } from '@entities/task';
+import { reviewKeys, topicKeys } from '@entities/topic';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,7 +23,13 @@ export function useSubtasks(task: Task) {
   const toggle = useMutation({
     mutationKey: taskMutationKeys.toggle,
     mutationFn: (step: Task) => taskRepository.updateStatus(step.id, nextStatusOnToggle(step)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+    // A finished step is study on its topic: the review schedule may have moved.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+        queryClient.invalidateQueries({ queryKey: topicKeys.all }),
+        queryClient.invalidateQueries({ queryKey: reviewKeys.all }),
+      ]),
     onError: (error) => showToast(describeError(error).message, 'danger'),
   });
 

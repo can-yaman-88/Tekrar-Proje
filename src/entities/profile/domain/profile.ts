@@ -18,4 +18,9 @@ export interface Profile {
    * zero everywhere, so no planner may put work on them.
    */
   blockedWeekdays: number[];
+  /**
+   * The student's own minutes per ISO weekday, where they know better than the
+   * history. Every planner obeys it; a blocked weekday still wins.
+   */
+  capacityOverrides: Record<number, number>;
 }

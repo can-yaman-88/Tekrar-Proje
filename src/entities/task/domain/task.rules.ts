@@ -14,6 +14,9 @@ export const HOMEWORK_SOURCES: readonly TaskSource[] = ['homework', 'ai_attachme
 
 export const isHomework = (task: Pick<Task, 'source'>): boolean => HOMEWORK_SOURCES.includes(task.source);
 
+/** Work the review schedule put on the board: finishing it asks how it went. */
+export const isReviewTask = (task: Pick<Task, 'source'>): boolean => task.source === 'spaced_repetition';
+
 /**
  * Work that has to be spread over the days before its deadline.
  *

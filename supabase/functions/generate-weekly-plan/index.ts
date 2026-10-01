@@ -53,6 +53,8 @@ Deno.serve(
       classLoad: context.classLoad,
       courseClassDays: context.courseClassDays,
       capacityByWeekday: context.capacity.minutesByWeekday,
+      capacitySources: Object.fromEntries(context.capacity.days.map((day) => [day.weekday, day.source])),
+      blockedWeekdays: context.capacity.days.filter((day) => day.source === 'blocked').map((day) => day.weekday),
     });
     log.info('planned', { userId, weekStart, slots: slots.length, topics: context.topics.length });
 

@@ -8,6 +8,8 @@ export const taskKeys = {
   backlog: (before: IsoDate) => [...taskKeys.all, 'backlog', before] as const,
   history: () => [...taskKeys.all, 'history'] as const,
   week: (weekStart: IsoDate) => [...taskKeys.all, 'week', weekStart] as const,
+  forTopic: (topicId: string) => [...taskKeys.all, 'topic', topicId] as const,
+  completedSince: (since: IsoDate) => [...taskKeys.all, 'completed-since', since] as const,
 };
 
 /** Keys of the mutations that survive a restart (see core/bootstrap/mutationDefaults). */

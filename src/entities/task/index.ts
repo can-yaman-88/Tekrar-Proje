@@ -1,4 +1,4 @@
-export { taskRepository } from './data/task.repository';
+export { taskRepository, type FinishedTaskRecord, type StatusChangeOptions } from './data/task.repository';
 export {
   EDITABLE_TASK_STATUSES,
   isOpen,
@@ -14,13 +14,22 @@ export {
   editableGroupOf,
   isDeadlineWork,
   isHomework,
+  isReviewTask,
   taskGroupOf,
   withStatus,
 } from './domain/task.rules';
 export type { EditableTaskType, TaskGroup } from './domain/task.rules';
 export type { Task, TaskPatch, TaskSource, TaskStatus, TaskType } from './domain/task.types';
 export { taskKeys, taskMutationKeys } from './model/task.keys';
-export { useBacklog, useFinishedTasks, useMissionTasks, useTask, useWeekTasks } from './model/task.queries';
+export {
+  useBacklog,
+  useCompletedSince,
+  useFinishedTasks,
+  useMissionTasks,
+  useTask,
+  useTopicTasks,
+  useWeekTasks,
+} from './model/task.queries';
 export { toTaskCardModel, type DailyShare, type TaskCardModel } from './model/task.view-model';
 export { TaskCard, type TaskCardProps } from './ui/TaskCard';
 export { TaskCardSkeleton } from './ui/TaskCard.skeleton';
