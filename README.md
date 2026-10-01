@@ -52,7 +52,7 @@ npx tsc --noEmit        # tip kontrolü
 npx expo lint           # katman sınırları dahil
 npx jest                # alan (domain) ve altyapı testleri (ayar: jest.config.js)
 npx expo-doctor         # bağımlılık uyumu
-npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 109 test)
+npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 123 test)
 ```
 
 Edge Function testleri (Deno kurulu değilse Docker ile):
@@ -550,7 +550,7 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 109 pgTAP testi
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 123 pgTAP testi
   bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
   satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
 - **Görev durumu tek kapıdan değişir.** `guard_task_status` tetikleyicisi, uygulamanın
@@ -597,12 +597,44 @@ durumlar yazılmaz.
   sunucu da kullanıcı başına saatte 30 ile sınırlar. Uygulamayı kapatan hata cihaza yazılır ve
   bir sonraki açılışta gönderilir. Geliştirme derlemesinde yalnızca konsola yazılır.
 - **Edge Functions:** 500 ve üstü her yanıt, istek kimliğiyle birlikte aynı tabloya yazılır.
-- Raporlar uygulamadan okunamaz; panodan (SQL Editor) bakılır, 90 gün sonra silinir:
+- Aynı hata tek **grupta** toplanır: nerede olduğu (sorgu, ekran ya da fonksiyon) ve mesajı, içindeki
+  kimlikler ve sayılar çıkarılarak karşılaştırılır — "görev 3fa8… başarısız" ile "görev 9c85…
+  başarısız" aynı gruptur. Raporlar 90 gün sonra silinir.
 
-  ```sql
-  select created_at, source, kind, message, detail->>'where', app_version, platform
-    from app_error_reports order by created_at desc limit 50;
-  ```
+### Haftalık hata özeti
+
+Her **pazartesi 06:17 UTC**'de (`error-digest` cron işi, `send_error_digest`) geçen haftanın özeti
+saklanır ve yöneticilere push bildirimi olarak gelir: kaç hata, kaç grup, geçen haftayla farkı ve en
+sık yaşanan. Bildirime dokununca **Hata özeti** ekranı açılır. Hata olmayan hafta saklanır ama
+bildirilmez.
+
+Ekran (Ayarlar → Geliştirici → Hata özeti; yalnızca yöneticiler görür): son 7 gün, son 30 gün ya da
+geçmiş haftalar; hata / grup / öğrenci / yeni grup / **geri dönen** sayıları; uygulama ve sunucu
+dağılımı; sürümler; en çok yaşanan 10 grup. Bir gruba dokununca arkasındaki raporlar açılır
+(zaman, sürüm, işlem, istek kimliği, yığın izi; öğrenci yalnızca kısa bir etiketle). **Düzeltildi
+olarak işaretle** dediğin grup yeniden görülürse "geri döndü" diye en üste çıkar.
+
+Kurulum tek seferlik, panodan (SQL Editor):
+
+```sql
+-- Kendini yönetici yap (uygulamadan kimse kendini yönetici yapamaz):
+insert into public.app_admins (user_id)
+select id from auth.users where email = 'sen@ornek.com';
+
+-- İsteğe bağlı: özet e-postayla da gelsin (Resend; 'from' doğrulanmış alan adı ister,
+-- vermezsen onboarding@resend.dev yalnızca kendi adresine gönderir):
+select vault.create_secret('<resend api key>', 'resend_api_key');
+select vault.create_secret('sen@ornek.com', 'error_digest_email');
+select vault.create_secret('Tekrar <hatalar@alanadin.com>', 'error_digest_from');
+```
+
+Push için telefonda tekrar hatırlatmalarının push olarak açık olması (bkz. Tekrar döngüsü) yeterli:
+özet, yöneticinin kayıtlı cihazlarına gider. Ham raporlara panodan da bakılabilir:
+
+```sql
+select created_at, source, kind, message, detail->>'where', app_version, platform
+  from app_error_reports order by created_at desc limit 50;
+```
 
 ## Çalışma döngüsü
 

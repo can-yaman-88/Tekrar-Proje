@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(109);
+select plan(123);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -930,6 +930,119 @@ select is(
   (select status::text from public.tasks where id = 'f1000000-0000-4000-8000-0000000000a1'),
   'skipped',
   'the set-aside container is skipped'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 19. The weekly error digest: grouped, admin-only, and announced once.
+-- ---------------------------------------------------------------------------
+-- Last week, on the UTC calendar the Monday job runs on.
+create temporary table digest_week as
+  select (date_trunc('week', now() at time zone 'UTC') at time zone 'UTC') - interval '2 days' as at,
+         (date_trunc('week', now() at time zone 'UTC') - interval '7 days')::date as week_start;
+grant select on digest_week to authenticated;
+
+insert into public.app_error_reports (user_id, source, kind, message, detail, app_version, platform, created_at) values
+  ('aaaaaaaa-0000-4000-8000-000000000001', 'app', 'server',
+   'task 3fa85f64-5717-4562-b3fc-2c963f66afa6 failed after 3 tries', '{"where":"[\"tasks\",\"mission\"]"}',
+   '1.0.0', 'android', (select at from digest_week)),
+  ('bbbbbbbb-0000-4000-8000-000000000002', 'app', 'server',
+   'task 9c858901-8a57-4791-81fe-4c455b099bc9 failed after 5 tries', '{"where":"[\"tasks\",\"mission\"]"}',
+   '1.0.0', 'android', (select at from digest_week) + interval '1 hour'),
+  (null, 'edge', 'daily-checkin:llm_error', 'model timed out', '{"requestId":"r-1","status":502}',
+   null, null, (select at from digest_week) + interval '2 hours');
+
+select is(
+  (select count(distinct fingerprint)::int from public.app_error_reports where message like 'task % failed after % tries'),
+  1,
+  'the same failure on another task is one group'
+);
+-- Reports are not readable from a device, admins included: the tests carry
+-- the group ids across the role switch.
+create temporary table digest_groups as
+  select distinct on (message like 'task %') message like 'task %' as is_task, fingerprint
+    from public.app_error_reports
+   where message like 'task % failed after % tries' or message = 'model timed out';
+grant select on digest_groups to authenticated;
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select throws_ok(
+  $$select public.admin_error_digest(7)$$,
+  '42501',
+  null,
+  'a student who is not an admin cannot read the digest'
+);
+select throws_ok(
+  $$insert into public.app_admins (user_id) values ('aaaaaaaa-0000-4000-8000-000000000001')$$,
+  '42501',
+  null,
+  'nobody promotes themselves to admin'
+);
+select is(public.is_app_admin(), false, 'not an admin yet');
+reset role;
+
+-- The dashboard makes A an admin.
+insert into public.app_admins (user_id) values ('aaaaaaaa-0000-4000-8000-000000000001');
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select is(public.is_app_admin(), true, 'an admin is told so');
+select is(
+  (select (g ->> 'count')::int
+     from jsonb_array_elements(public.admin_error_digest(14) -> 'top') g
+    where g ->> 'message' like 'task % failed after % tries'),
+  2,
+  'the digest counts a group across tasks and students'
+);
+select is(
+  (select jsonb_array_length(public.admin_error_group_reports(
+     (select fingerprint from digest_groups where is_task)) -> 'reports')),
+  2,
+  'an admin reads the reports behind a group'
+);
+select lives_ok(
+  $$select public.admin_set_error_group_resolved(
+      (select fingerprint from digest_groups where not is_task), true, 'zaman aşımı uzatıldı')$$,
+  'an admin marks a group as fixed'
+);
+reset role;
+
+-- Fixed an hour ago — and it happens again half an hour later.
+update public.error_group_states set resolved_at = now() - interval '1 hour'
+ where fingerprint = (select fingerprint from digest_groups where not is_task);
+insert into public.app_error_reports (source, kind, message, detail, created_at)
+values ('edge', 'daily-checkin:llm_error', 'model timed out', '{"requestId":"r-2","status":502}', now() - interval '30 minutes');
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select is(
+  (select (g ->> 'isRegression')::boolean
+     from jsonb_array_elements(public.admin_error_digest(14) -> 'top') g
+    where g ->> 'message' = 'model timed out'),
+  true,
+  'a fixed group that shows up again is reported as back'
+);
+reset role;
+
+select is(public.send_error_digest() >= 1, true, 'Monday''s digest is pushed to the admins'' devices');
+select is(
+  (select (payload ->> 'total')::int >= 3 and notified_at is not null
+     from public.error_digests
+    where week_start = (select week_start from digest_week)),
+  true,
+  'last week''s digest is stored and marked as sent'
+);
+select is(public.send_error_digest(), 0, 'a second run the same week sends nothing');
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select is((select count(*)::int from public.error_digests), 0, 'a student who is not an admin sees no digest');
+select throws_ok(
+  $$select public.admin_set_error_group_resolved((select fingerprint from digest_groups where not is_task), false)$$,
+  '42501',
+  null,
+  'nor can they reopen a group'
 );
 reset role;
 

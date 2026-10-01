@@ -55,6 +55,7 @@ export function useNotificationActions(): void {
 
       if (route === '/weekly-summary') router.push('/weekly-summary');
       if (route === '/notebook') router.push('/notebook');
+      if (route === '/error-digest') router.push('/error-digest');
     };
 
     // A response that launched the app from cold start is waiting here.

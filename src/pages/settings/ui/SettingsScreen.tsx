@@ -1,3 +1,4 @@
+import { useIsAdmin } from '@entities/error-report';
 import { useProfile, useSetAutoWeeklyPlan } from '@entities/profile';
 import { selectUserEmail, useSessionStore } from '@entities/session';
 import { useSignOut } from '@features/auth';
@@ -36,6 +37,7 @@ export function SettingsScreen() {
   const profile = useProfile();
   const autoWeeklyPlan = useSetAutoWeeklyPlan();
   const signOut = useSignOut();
+  const isAdmin = useIsAdmin().data === true;
   const router = useRouter();
   const styles = useStyles();
 
@@ -87,6 +89,17 @@ export function SettingsScreen() {
         <LlmApiKeyCard apiKey={apiKey} />
 
         <LlmModelCard settings={llmModel} />
+
+        {isAdmin ? (
+          <Card style={styles.card}>
+            <AppText variant="label">Geliştirici</AppText>
+            <AppText variant="caption" tone="muted">
+              Uygulamada ve sunucuda yaşanan hatalar, gruplanmış halde. Her pazartesi geçen haftanın özeti
+              bildirim olarak da gelir.
+            </AppText>
+            <Button label="Hata özeti" variant="secondary" onPress={() => router.push('/error-digest')} />
+          </Card>
+        ) : null}
 
         <Button
           label="Çıkış yap"

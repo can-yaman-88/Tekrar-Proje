@@ -9,11 +9,35 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      app_admins: {
+        Row: {
+          added_at: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_admins_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_error_reports: {
         Row: {
           app_version: string | null
           created_at: string
           detail: Json | null
+          fingerprint: string | null
           id: string
           kind: string
           message: string
@@ -25,6 +49,7 @@ export type Database = {
           app_version?: string | null
           created_at?: string
           detail?: Json | null
+          fingerprint?: never
           id?: string
           kind: string
           message: string
@@ -36,6 +61,7 @@ export type Database = {
           app_version?: string | null
           created_at?: string
           detail?: Json | null
+          fingerprint?: never
           id?: string
           kind?: string
           message?: string
@@ -538,6 +564,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      error_digests: {
+        Row: {
+          created_at: string
+          notified_at: string | null
+          payload: Json
+          period_from: string
+          period_to: string
+          week_start: string
+        }
+        Insert: {
+          created_at?: string
+          notified_at?: string | null
+          payload: Json
+          period_from: string
+          period_to: string
+          week_start: string
+        }
+        Update: {
+          created_at?: string
+          notified_at?: string | null
+          payload?: Json
+          period_from?: string
+          period_to?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
+      error_group_states: {
+        Row: {
+          fingerprint: string
+          note: string | null
+          resolved_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          fingerprint: string
+          note?: string | null
+          resolved_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          fingerprint?: string
+          note?: string | null
+          resolved_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       exam_topics: {
         Row: {
@@ -1302,6 +1376,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_error_digest: { Args: { p_days?: number }; Returns: Json }
+      admin_error_group_reports: {
+        Args: { p_fingerprint: string; p_limit?: number }
+        Returns: Json
+      }
+      admin_set_error_group_resolved: {
+        Args: { p_fingerprint: string; p_note?: string; p_resolved: boolean }
+        Returns: Json
+      }
       apply_checkin_edits: {
         Args: {
           p_daily_log_id: string
@@ -1433,6 +1516,14 @@ export type Database = {
         }
         Returns: Json
       }
+      error_digest_payload: {
+        Args: { p_from: string; p_to: string }
+        Returns: Json
+      }
+      error_group_label: {
+        Args: { p_kind: string; p_location: string; p_source: string }
+        Returns: string
+      }
       group_learning_pair: {
         Args: { p_child_ids: string[]; p_due_date: string; p_title: string }
         Returns: string
@@ -1446,6 +1537,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      html_escape: { Args: { p_text: string }; Returns: string }
+      is_app_admin: { Args: never; Returns: boolean }
       is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
       is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
       kick_off_weekly_plans: { Args: never; Returns: number }
@@ -1487,6 +1580,7 @@ export type Database = {
         Returns: boolean
       }
       revert_daily_checkin: { Args: { p_daily_log_id: string }; Returns: Json }
+      send_error_digest: { Args: never; Returns: number }
       send_review_reminders: { Args: never; Returns: number }
       set_llm_api_key: { Args: { p_key: string }; Returns: Json }
       set_task_status: {
