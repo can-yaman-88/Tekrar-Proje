@@ -7,6 +7,7 @@ export const taskKeys = {
   subtasks: (taskId: string) => [...taskKeys.all, 'subtasks', taskId] as const,
   backlog: (before: IsoDate) => [...taskKeys.all, 'backlog', before] as const,
   history: () => [...taskKeys.all, 'history'] as const,
+  historyCounts: () => [...taskKeys.all, 'history-counts'] as const,
   week: (weekStart: IsoDate) => [...taskKeys.all, 'week', weekStart] as const,
   forTopic: (topicId: string) => [...taskKeys.all, 'topic', topicId] as const,
   completedSince: (since: IsoDate) => [...taskKeys.all, 'completed-since', since] as const,

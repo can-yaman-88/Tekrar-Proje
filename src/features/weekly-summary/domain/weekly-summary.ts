@@ -5,7 +5,7 @@
 // student timed their work the minutes are real; if they did not, the summary
 // says so rather than quietly showing estimates as fact.
 import type { IsoDate, TaskType } from '@contracts/enums.contract';
-import { addDays } from '@shared/lib/date';
+import { addDays, localDateOf } from '@shared/lib/date';
 
 /** The same labels the task board uses, homework included. */
 export type TaskGroup = 'concepts' | 'quiz' | 'feynman' | 'homework';
@@ -127,7 +127,7 @@ export function buildWeekSummary({
   const total = inWeek.length;
 
   const weekSessions = sessions.filter((session) => {
-    const day = session.startedAt.slice(0, 10);
+    const day = localDateOf(session.startedAt);
     return day >= weekStart && day <= weekEnd;
   });
   const measuredMinutes = weekSessions.reduce((sum, session) => sum + session.minutes, 0);
@@ -135,7 +135,7 @@ export function buildWeekSummary({
 
   const minutesByDay = new Map<IsoDate, number>();
   for (const session of weekSessions) {
-    const day = session.startedAt.slice(0, 10) as IsoDate;
+    const day = localDateOf(session.startedAt);
     minutesByDay.set(day, (minutesByDay.get(day) ?? 0) + session.minutes);
   }
 

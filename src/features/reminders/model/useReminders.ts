@@ -7,6 +7,7 @@ import {
   ensurePermission,
   registerNotificationCategories,
 } from '../data/notifications';
+import { syncReviewPush } from './reviewPush';
 import {
   REMINDER_HOURS,
   REVIEW_HOURS,
@@ -39,7 +40,14 @@ export function useReminders() {
       if (!next.checkin) await cancelCheckinReminder();
       if (!next.exams) await cancelExamReminders();
       if (!next.reviews) await cancelReviewReminders();
-      return next;
+      // Review reminders go by push when this device can take it, so they
+      // arrive even on days the app is never opened.
+      const pushToken =
+        next.reviews !== state.reviewsEnabled || next.reviewHour !== state.reviewHour
+          ? await syncReviewPush(next.reviews, next.reviewHour)
+          : state.pushToken;
+      if (pushToken !== null) await cancelReviewReminders();
+      return { ...next, pushToken };
     },
     onSuccess: (next) => {
       state.setCheckinEnabled(next.checkin);
@@ -49,6 +57,7 @@ export function useReminders() {
       state.setWeeklySummaryEnabled(next.summary);
       state.setReviewsEnabled(next.reviews);
       state.setReviewHour(next.reviewHour);
+      state.setPushToken(next.pushToken);
     },
     onError: (error) => showToast(error.message, 'danger'),
   });
@@ -71,6 +80,8 @@ export function useReminders() {
     summaryEnabled: state.weeklySummaryEnabled,
     reviewsEnabled: state.reviewsEnabled,
     reviewHour: state.reviewHour,
+    /** Review reminders come from the server by push rather than from this device. */
+    reviewsByPush: state.pushToken !== null,
     hours: REMINDER_HOURS,
     reviewHours: REVIEW_HOURS,
     isBusy: apply.isPending,

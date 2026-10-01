@@ -1,6 +1,7 @@
 import type { IsoDate, StudyStep, TaskType } from '@contracts/enums.contract';
 import type { ProgressCourse } from '@domain/progress';
 import { BaseRepository } from '@shared/api/repository';
+import { localDateOf } from '@shared/lib/date';
 
 const STUDY_STEPS: readonly StudyStep[] = ['concept_note', 'feynman', 'quiz', 'advanced_problems'];
 const isStudyStep = (type: TaskType): type is StudyStep => (STUDY_STEPS as readonly string[]).includes(type);
@@ -65,7 +66,7 @@ export class ProgressRepository extends BaseRepository {
 
       // The loop is finished when its last step is: that is the date the pace
       // is measured from.
-      const finishedOn = task.completed_at?.slice(0, 10);
+      const finishedOn = task.completed_at ? localDateOf(task.completed_at) : undefined;
       if (finishedOn && (lastStepAt.get(task.topic_id) ?? '') < finishedOn) {
         lastStepAt.set(task.topic_id, finishedOn);
       }

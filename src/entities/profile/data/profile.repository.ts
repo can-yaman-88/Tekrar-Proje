@@ -4,7 +4,7 @@ import { AppError } from '@shared/lib/errors';
 import type { Profile } from '../domain/profile';
 
 const PROFILE_SELECT =
-  'id, display_name, timezone, llm_model, llm_key_hint, llm_key_set_at, auto_weekly_plan, blocked_weekdays, capacity_overrides';
+  'id, display_name, timezone, llm_model, llm_key_hint, llm_key_set_at, auto_weekly_plan, blocked_weekdays, capacity_overrides, review_push_hour';
 
 export class ProfileRepository extends BaseRepository {
   async get(): Promise<Profile> {
@@ -23,7 +23,30 @@ export class ProfileRepository extends BaseRepository {
       autoWeeklyPlan: row.auto_weekly_plan,
       blockedWeekdays: [...row.blocked_weekdays].sort((a, b) => a - b),
       capacityOverrides: parseCapacityOverrides(row.capacity_overrides),
+      reviewPushHour: row.review_push_hour,
     };
+  }
+
+  /** The hour the server may push the day's reviews at; null switches push reminders off. */
+  async setReviewPushHour(hour: number | null): Promise<void> {
+    const userId = await this.requireUserId();
+    const value = hour === null ? null : Math.min(23, Math.max(0, Math.round(hour)));
+    await this.execute(
+      'profiles.setReviewPushHour',
+      this.db.from('profiles').update({ review_push_hour: value }).eq('id', userId).select('id').single(),
+    );
+  }
+
+  /** This device can now be reached by push; the database hands it to whoever signed in last. */
+  async registerPushToken(token: string, platform: 'ios' | 'android'): Promise<void> {
+    await this.execute(
+      'profiles.registerPushToken',
+      this.db.rpc('register_push_token', { p_token: token, p_platform: platform }),
+    );
+  }
+
+  async unregisterPushToken(token: string): Promise<void> {
+    await this.execute('profiles.unregisterPushToken', this.db.rpc('unregister_push_token', { p_token: token }));
   }
 
   /**

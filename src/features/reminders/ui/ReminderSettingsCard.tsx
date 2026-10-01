@@ -63,6 +63,11 @@ export function ReminderSettingsCard({ reminders }: { reminders: RemindersContro
           <AppText>Tekrar zamanı</AppText>
           <AppText variant="caption" tone="muted">
             Bir konunun aralıklı tekrar günü geldiğinde haber verir; kaçırılan tekrar ertesi gün yine hatırlatılır.
+            {reminders.reviewsEnabled
+              ? reminders.reviewsByPush
+                ? ' Sunucudan gelir: uygulamayı açmasan da ulaşır.'
+                : ' Bu cihazda kurulur; uygulamayı birkaç günde bir açman yeterli.'
+              : ''}
           </AppText>
         </View>
         <Switch

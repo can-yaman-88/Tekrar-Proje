@@ -23,4 +23,6 @@ export interface Profile {
    * history. Every planner obeys it; a blocked weekday still wins.
    */
   capacityOverrides: Record<number, number>;
+  /** Local hour the server pushes the day's due reviews; null = no push reminders. */
+  reviewPushHour: number | null;
 }

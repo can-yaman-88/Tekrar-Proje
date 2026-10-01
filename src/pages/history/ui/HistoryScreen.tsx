@@ -35,6 +35,15 @@ export function HistoryScreen() {
       <SectionList
         sections={vm.sections}
         keyExtractor={(item) => item.id}
+        onEndReached={vm.loadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          vm.sections.length === 0 ? null : (
+            <AppText variant="caption" tone="muted" style={styles.footer}>
+              {vm.isLoadingMore ? 'Daha eskiler yükleniyor…' : vm.hasMore ? ' ' : 'Hepsi bu kadar.'}
+            </AppText>
+          )
+        }
         contentContainerStyle={styles.content}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -104,4 +113,5 @@ const useStyles = makeStyles(({ spacing }) => ({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xl, marginBottom: spacing.sm },
   separator: { height: spacing.sm },
   skeletonItem: { marginBottom: spacing.sm },
+  footer: { textAlign: 'center', paddingVertical: 16 },
 }));

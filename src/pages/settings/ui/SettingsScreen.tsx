@@ -5,7 +5,7 @@ import { CapacityCard, useLearnedCapacity } from '@features/capacity';
 import { WeeklyPlanCard } from '@features/weekly-plan';
 import { LlmApiKeyCard, useLlmApiKey } from '@features/llm-key';
 import { LlmModelCard, useLlmModelSettings } from '@features/llm-model';
-import { ReminderSettingsCard, useReminders } from '@features/reminders';
+import { ReminderSettingsCard, releaseDevicePush, useReminders, useRemindersStore } from '@features/reminders';
 import {
   AppText,
   Button,
@@ -88,7 +88,19 @@ export function SettingsScreen() {
 
         <LlmModelCard settings={llmModel} />
 
-        <Button label="Çıkış yap" variant="secondary" loading={signOut.isPending} onPress={() => signOut.mutate()} />
+        <Button
+          label="Çıkış yap"
+          variant="secondary"
+          loading={signOut.isPending}
+          onPress={() =>
+            // This device stops receiving the account's reminders first, while
+            // the session that may ask for it still exists.
+            void releaseDevicePush(useRemindersStore.getState().pushToken).finally(() => {
+              useRemindersStore.getState().setPushToken(null);
+              signOut.mutate();
+            })
+          }
+        />
       </ScrollView>
     </Screen>
   );

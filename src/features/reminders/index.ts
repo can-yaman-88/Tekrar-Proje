@@ -12,6 +12,7 @@ export {
   type ReviewHour,
 } from './model/reminders.store';
 export { useReviewReminderSync } from './model/useReviewReminderSync';
+export { releaseDevicePush } from './model/reviewPush';
 export { useExamReminderSync } from './model/useExamReminderSync';
 export { useReminders, type RemindersController } from './model/useReminders';
 export { ReminderSettingsCard } from './ui/ReminderSettingsCard';

@@ -2,7 +2,7 @@ import { NoteItem } from '@entities/task-note';
 import { MistakeList } from '@entities/topic-mistake';
 import { NoteComposer } from '@features/task-note-add';
 import { TaskTimerCard } from '@features/task-timer';
-import { formatShortDate } from '@shared/lib/date';
+import { formatShortDate, localDateOf } from '@shared/lib/date';
 import { AppText, Card, ErrorState, Screen, Skeleton, makeStyles } from '@shared/ui';
 import { useLocalSearchParams } from 'expo-router';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
@@ -102,7 +102,7 @@ export function TaskDetailScreen() {
                 <NoteItem
                   key={note.id}
                   note={note}
-                  dateLabel={formatShortDate(note.createdAt.slice(0, 10))}
+                  dateLabel={formatShortDate(localDateOf(note.createdAt))}
                   onDelete={detail.noteForm.onDelete}
                   deleteDisabled={detail.noteForm.isDeleting}
                 />

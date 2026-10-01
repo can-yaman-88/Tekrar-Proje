@@ -1,5 +1,5 @@
 import type { IsoDate } from '@contracts/enums.contract';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { taskRepository } from '../data/task.repository';
 import { taskKeys } from './task.keys';
 
@@ -10,11 +10,21 @@ export function useTask(taskId: string) {
   });
 }
 
-export function useFinishedTasks() {
-  return useQuery({
+const HISTORY_PAGE_SIZE = 40;
+
+/** Finished work, a page at a time; the next page loads when the list nears its end. */
+export function useFinishedTaskPages() {
+  return useInfiniteQuery({
     queryKey: taskKeys.history(),
-    queryFn: () => taskRepository.listFinished(),
+    queryFn: ({ pageParam }) => taskRepository.listFinishedPage(pageParam, HISTORY_PAGE_SIZE),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => (lastPage.length < HISTORY_PAGE_SIZE ? undefined : allPages.length),
   });
+}
+
+/** The real totals, not the length of what happens to be loaded. */
+export function useFinishedCounts() {
+  return useQuery({ queryKey: taskKeys.historyCounts(), queryFn: () => taskRepository.countFinished() });
 }
 
 export function useWeekTasks(weekStart: IsoDate, weekEnd: IsoDate) {

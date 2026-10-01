@@ -1,8 +1,12 @@
 import { useReviewRadar } from '@entities/topic';
 import { addDays, todayLocal } from '@shared/lib/date';
 import { useEffect, useMemo } from 'react';
-import { scheduleReviewReminders, type ReviewReminderDay } from '../data/notifications';
+import { cancelReviewReminders, scheduleReviewReminders, type ReviewReminderDay } from '../data/notifications';
 import { useRemindersStore } from './reminders.store';
+import { syncReviewPush } from './reviewPush';
+
+/** Push tokens can rotate; the server hears this device's current one once per launch. */
+let pushCheckedThisLaunch = false;
 
 /** How far ahead review notifications are laid down; the set is rewritten on every change. */
 const HORIZON_DAYS = 14;
@@ -14,7 +18,15 @@ const HORIZON_DAYS = 14;
 export function useReviewReminderSync(): void {
   const enabled = useRemindersStore((s) => s.reviewsEnabled);
   const hour = useRemindersStore((s) => s.reviewHour);
+  const pushToken = useRemindersStore((s) => s.pushToken);
+  const setPushToken = useRemindersStore((s) => s.setPushToken);
   const radar = useReviewRadar();
+
+  useEffect(() => {
+    if (!enabled || pushCheckedThisLaunch) return;
+    pushCheckedThisLaunch = true;
+    void syncReviewPush(true, hour).then(setPushToken);
+  }, [enabled, hour, setPushToken]);
 
   const days = useMemo<ReviewReminderDay[]>(() => {
     const today = todayLocal();
@@ -39,8 +51,13 @@ export function useReviewReminderSync(): void {
 
   useEffect(() => {
     if (!enabled || !isLoaded) return;
+    // The server pushes them: scheduling them here too would say it twice.
+    if (pushToken !== null) {
+      void cancelReviewReminders();
+      return;
+    }
     void scheduleReviewReminders(days, hour);
     // `signature` captures the schedule the notifications depend on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, hour, signature, isLoaded]);
+  }, [enabled, hour, signature, isLoaded, pushToken]);
 }

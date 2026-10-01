@@ -12,7 +12,7 @@ import { useTopicMistakes } from '@entities/topic-mistake';
 import { useMistakeActions } from '@features/mistake-book';
 import { useNoteForm } from '@features/task-note-add';
 import { useTaskTimer } from '@features/task-timer';
-import { formatLongDate, formatRelativeDay, formatShortDate, todayLocal } from '@shared/lib/date';
+import { formatLongDate, formatRelativeDay, formatShortDate, localDateOf, todayLocal } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { useRouter } from 'expo-router';
 
@@ -41,7 +41,7 @@ export function useTaskDetail(taskId: string) {
           // Same label the card and the filter chip use.
           typeLabel: isHomework(task) ? TASK_GROUP_LABEL.homework : TASK_TYPE_LABEL[task.type],
           statusLabel: TASK_STATUS_LABEL[task.status],
-          completedLabel: task.completedAt ? formatLongDate(task.completedAt.slice(0, 10)) : null,
+          completedLabel: task.completedAt ? formatLongDate(localDateOf(task.completedAt)) : null,
           accuracyLabel:
             task.correctCount !== null && task.completedCount > 0
               ? `${task.correctCount}/${task.completedCount} doğru (%${Math.round(

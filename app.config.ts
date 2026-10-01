@@ -11,6 +11,15 @@ import type { ExpoConfig } from 'expo/config';
  */
 const allowCleartext = process.env.TEKRAR_ALLOW_CLEARTEXT === '1';
 
+/**
+ * Push notifications need the EAS project the build belongs to. Without it the
+ * app still works and reminders stay local (scheduled on the device); with it
+ * the server can reach the student even when the app has not been opened.
+ *
+ *   EAS_PROJECT_ID=<id from `npx eas-cli project:info`> npm run apk
+ */
+const easProjectId = process.env.EAS_PROJECT_ID;
+
 const config: ExpoConfig = {
   name: 'Tekrar',
   slug: 'tekrar',
@@ -41,6 +50,30 @@ const config: ExpoConfig = {
     'expo-status-bar',
     'expo-secure-store',
     [
+      'expo-notifications',
+      {
+        // Android draws the status-bar icon from its alpha channel alone.
+        icon: './assets/notification-icon.png',
+        color: '#3451D1',
+        defaultChannel: 'reminders',
+      },
+    ],
+    [
+      'expo-calendar',
+      {
+        calendarPermission: 'Ders programını takviminden içe aktarmak için takvimini okur.',
+        remindersPermission: false,
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'Değerlendirmene ödev ya da not fotoğrafı eklemek için galerini açar.',
+        cameraPermission: 'Değerlendirmene ödev ya da not fotoğrafı çekip eklemek için kamerayı açar.',
+        microphonePermission: false,
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         image: './assets/splash-icon.png',
@@ -60,6 +93,7 @@ const config: ExpoConfig = {
   experiments: {
     typedRoutes: true,
   },
+  ...(easProjectId ? { extra: { eas: { projectId: easProjectId } } } : {}),
 };
 
 export default config;

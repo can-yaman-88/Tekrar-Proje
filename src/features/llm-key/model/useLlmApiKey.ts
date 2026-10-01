@@ -1,5 +1,5 @@
 import { useClearLlmApiKey, useProfile, useSetLlmApiKey } from '@entities/profile';
-import { formatLongDate } from '@shared/lib/date';
+import { formatLongDate, localDateOf } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
 import { useCallback, useState } from 'react';
@@ -56,7 +56,7 @@ export function useLlmApiKey() {
     /** True when a key of the student's own is in use. */
     hasKey: hint !== null,
     /** e.g. "••••1a2b · 26 Eylül 2026" — never the key itself. */
-    keyLabel: hint === null ? null : `••••${hint}${setAt ? ` · ${formatLongDate(setAt.slice(0, 10))}` : ''}`,
+    keyLabel: hint === null ? null : `••••${hint}${setAt ? ` · ${formatLongDate(localDateOf(setAt))}` : ''}`,
     draft,
     onChangeDraft: setDraft,
     canSave: draft.trim().length >= MIN_KEY_LENGTH && !save.isPending,

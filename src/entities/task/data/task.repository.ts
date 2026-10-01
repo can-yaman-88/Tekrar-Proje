@@ -1,5 +1,6 @@
 import type { IsoDate } from '@contracts/enums.contract';
 import { BaseRepository } from '@shared/api/repository';
+import { fromPostgrestError } from '@shared/lib/errors';
 import { addDays, todayLocal } from '@shared/lib/date';
 import type { Task, TaskPatch, TaskStatus } from '../domain/task.types';
 import { TASK_SELECT, toTask } from './task.mapper';
@@ -153,19 +154,35 @@ export class TaskRepository extends BaseRepository {
     return result;
   }
 
-  /** Finished work, newest first — the History screen. */
-  async listFinished(limit = 100): Promise<Task[]> {
+  /** One page of finished work, newest first — the History screen loads more as it scrolls. */
+  async listFinishedPage(page: number, pageSize: number): Promise<Task[]> {
+    const from = Math.max(0, page) * pageSize;
     const rows = await this.execute(
-      'tasks.listFinished',
+      'tasks.listFinishedPage',
       this.db
         .from('tasks')
         .select(TASK_SELECT)
         .in('status', ['completed', 'failed', 'skipped'])
         .order('completed_at', { ascending: false, nullsFirst: false })
         .order('due_date', { ascending: false })
-        .limit(limit),
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1),
     );
     return rows.map(toTask);
+  }
+
+  /** How much is finished in total, counted by the database rather than from a page. */
+  async countFinished(): Promise<{ completed: number; failed: number; skipped: number }> {
+    const count = async (status: 'completed' | 'failed' | 'skipped'): Promise<number> => {
+      const { count: total, error } = await this.db
+        .from('tasks')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', status);
+      if (error) throw fromPostgrestError(error, `tasks.count.${status}`);
+      return total ?? 0;
+    };
+    const [completed, failed, skipped] = await Promise.all([count('completed'), count('failed'), count('skipped')]);
+    return { completed, failed, skipped };
   }
 
   /**

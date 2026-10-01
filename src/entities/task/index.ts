@@ -24,7 +24,8 @@ export { taskKeys, taskMutationKeys } from './model/task.keys';
 export {
   useBacklog,
   useCompletedSince,
-  useFinishedTasks,
+  useFinishedCounts,
+  useFinishedTaskPages,
   useMissionTasks,
   useTask,
   useTopicTasks,
