@@ -1950,7 +1950,59 @@ Deno.test('"vize için plan çıkar": sınav ekranının planı görev olur, dok
   assertEquals(plan.examLinks.every((link) => link.exam_id === 'e-soon'), true);
   assertEquals(plan.taskRemovals.map((r) => r.task_id), ['old-sprint']);
   const days = new Set(sprint.map((t) => t.due_date)).size;
-  assertEquals(plan.schedule.examPlans, [{ examId: 'e-soon', tasks: 3, days }]);
+  assertEquals(plan.schedule.examPlans, [{ examId: 'e-soon', tasks: 3, days, mixedSets: 0 }]);
+});
+
+Deno.test('"vize için plan çıkar": karışık set, her konu bir adım olarak gelir; başlanmış set bölünmez', () => {
+  const exam = { id: 'e-mix', courseId: 'c-phys', title: 'Fizik final', examDate: '2026-10-11' };
+  const learned = (id: string, title: string, easeFactor: number) => ({
+    id,
+    title,
+    weekNumber: 2,
+    position: 0,
+    easeFactor,
+    repetitions: 2,
+    nextReviewOn: null,
+    completedSteps: ['concept_note', 'quiz', 'feynman'] as ('concept_note' | 'quiz' | 'feynman')[],
+    recentFailures: 0,
+  });
+  const plan = planCheckinEffects({
+    logDate: TODAY,
+    tasks: [
+      // An old set nobody touched, and one whose first step is done.
+      task('old-set', 'top-gauss', { source: 'exam_cram', originExamId: 'e-mix', type: 'mock_exam' }),
+      task('old-step', 'top-gauss', { source: 'exam_cram', originExamId: 'e-mix', parentTaskId: 'old-set' }),
+      task('busy-set', 'top-truss', { source: 'exam_cram', originExamId: 'e-mix', type: 'mock_exam', status: 'in_progress' }),
+      task('busy-done', 'top-truss', { source: 'exam_cram', originExamId: 'e-mix', parentTaskId: 'busy-set', status: 'completed', completedCount: 4 }),
+      task('busy-left', 'top-carnot', { source: 'exam_cram', originExamId: 'e-mix', parentTaskId: 'busy-set' }),
+    ],
+    topics,
+    exams: [exam],
+    capacityByWeekday: WIDE,
+    cramContexts: [
+      {
+        examId: 'e-mix',
+        topics: [learned('top-gauss', 'Gauss', 1.7), learned('top-truss', 'Kafes', 2.4), learned('top-carnot', 'Carnot', 2.8)],
+      },
+    ],
+    extraction: extraction({ examPlans: [{ examId: 'e-mix' }] }),
+  });
+
+  const sets = plan.newTasks.filter((t) => t.type === 'mock_exam');
+  assertEquals(sets.length > 0, true);
+  for (const set of sets) {
+    const steps = plan.newTasks.filter((t) => t.parent_task_id === set.id);
+    assertEquals(steps.length >= 2, true);
+    assertEquals(steps.every((step) => step.type === 'problem_set' && step.due_date === set.due_date), true);
+    assertEquals(new Set(steps.map((step) => step.topic_id)).size, steps.length);
+    assertEquals(set.due_date < exam.examDate, true);
+  }
+  // Everything new is linked to the exam.
+  const linked = new Set(plan.examLinks.map((link) => link.task_id));
+  assertEquals(plan.newTasks.filter((t) => t.source === 'exam_cram').every((t) => linked.has(t.id)), true);
+  // The untouched set goes whole (its step with it); the started one stays, all of it.
+  assertEquals(plan.taskRemovals.map((r) => r.task_id), ['old-set']);
+  assertEquals(plan.schedule.examPlans[0]?.mixedSets, sets.length);
 });
 
 Deno.test('sınava bir haftadan fazla varsa plan çıkarılmaz, nedeni söylenir', () => {

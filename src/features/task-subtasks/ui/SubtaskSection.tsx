@@ -11,9 +11,11 @@ export function SubtaskSection({ subtasks }: { subtasks: SubtaskController }) {
 
   return (
     <Card style={styles.card}>
-      <AppText variant="subtitle">Alt adımlar</AppText>
+      <AppText variant="subtitle">{subtasks.canEdit ? 'Alt adımlar' : 'Setteki konular'}</AppText>
       <AppText variant="caption" tone="muted">
-        Ödevi parçalara bölersen görev listesinde tek kart olarak kalır, adımları tek tek işaretlersin.
+        {subtasks.canEdit
+          ? 'Ödevi parçalara bölersen görev listesinde tek kart olarak kalır, adımları tek tek işaretlersin.'
+          : 'Her konu setin bir parçası; puanını seti bitirirken girersin.'}
       </AppText>
 
       {subtasks.isLoading ? (
@@ -40,27 +42,38 @@ export function SubtaskSection({ subtasks }: { subtasks: SubtaskController }) {
                 {step.estimatedMinutes ? ` · ${step.estimatedMinutes} dk` : ''}
               </AppText>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`"${step.title}" adımını sil`}
-              hitSlop={10}
-              disabled={subtasks.isRemoving}
-              onPress={() => subtasks.onRemove(step.id)}
-            >
-              <Ionicons name="close" size={16} color={colors.textMuted} />
-            </Pressable>
+            {subtasks.canEdit ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`"${step.title}" adımını sil`}
+                hitSlop={10}
+                disabled={subtasks.isRemoving}
+                onPress={() => subtasks.onRemove(step.id)}
+              >
+                <Ionicons name="close" size={16} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
           </View>
         ))
       )}
 
-      <TextField
-        label="Yeni adım"
-        value={subtasks.draft}
-        onChangeText={subtasks.onChangeDraft}
-        placeholder="1-8 arası soruları çöz"
-        maxLength={200}
-      />
-      <Button label="Adım ekle" loading={subtasks.isAdding} disabled={!subtasks.canSubmit} onPress={subtasks.onAdd} />
+      {subtasks.canEdit ? (
+        <>
+          <TextField
+            label="Yeni adım"
+            value={subtasks.draft}
+            onChangeText={subtasks.onChangeDraft}
+            placeholder="1-8 arası soruları çöz"
+            maxLength={200}
+          />
+          <Button
+            label="Adım ekle"
+            loading={subtasks.isAdding}
+            disabled={!subtasks.canSubmit}
+            onPress={subtasks.onAdd}
+          />
+        </>
+      ) : null}
       {subtasks.canUngroup ? (
         <Button
           label="Grubu dağıt"

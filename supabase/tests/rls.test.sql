@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(123);
+select plan(133);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -1043,6 +1043,110 @@ select throws_ok(
   '42501',
   null,
   'nor can they reopen a group'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 20. Mixed sets: built as a group, scored per topic, never cut in half.
+-- ---------------------------------------------------------------------------
+insert into public.topics (id, user_id, course_id, title, ease_factor, interval_days, repetitions) values
+  ('d0000000-0000-4000-8000-0000000000a5', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'Karışık konu 1', 2.5, 6, 2),
+  ('d0000000-0000-4000-8000-0000000000a6', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'Karışık konu 2', 2.5, 6, 2);
+insert into public.exams (id, user_id, course_id, kind, title, exam_date) values
+  ('11111111-0000-4000-8000-0000000000a3', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'c0000000-0000-4000-8000-00000000000a', 'midterm', 'A finali', current_date + 5);
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select is(
+  public.apply_exam_cram_plan('11111111-0000-4000-8000-0000000000a3', jsonb_build_array(
+    jsonb_build_object('id', 'f2000000-0000-4000-8000-0000000000a1', 'topic_id', 'd0000000-0000-4000-8000-0000000000a5',
+      'type', 'mock_exam', 'title', 'Karışık tekrar · 9 soru', 'instructions', 'Sıra: A B A B A B A B A',
+      'estimated_minutes', 36, 'due_date', current_date + 1),
+    jsonb_build_object('id', 'f2000000-0000-4000-8000-0000000000a2', 'parent_id', 'f2000000-0000-4000-8000-0000000000a1',
+      'topic_id', 'd0000000-0000-4000-8000-0000000000a5', 'type', 'problem_set', 'title', 'Konu 1 · 5 soru',
+      'target_count', 5, 'estimated_minutes', 20, 'due_date', current_date + 1),
+    jsonb_build_object('id', 'f2000000-0000-4000-8000-0000000000a3', 'parent_id', 'f2000000-0000-4000-8000-0000000000a1',
+      'topic_id', 'd0000000-0000-4000-8000-0000000000a6', 'type', 'problem_set', 'title', 'Konu 2 · 4 soru',
+      'target_count', 4, 'estimated_minutes', 16, 'due_date', current_date + 1),
+    -- A step that tries to hang off a task this call did not create is dropped.
+    jsonb_build_object('parent_id', 'e0000000-0000-4000-8000-00000000000a',
+      'topic_id', 'd0000000-0000-4000-8000-0000000000a6', 'type', 'problem_set', 'title', 'Kaçak adım',
+      'target_count', 1, 'estimated_minutes', 4, 'due_date', current_date + 1)
+  )) ->> 'steps',
+  '2',
+  'the exam plan creates a mixed set as a container with one step per topic'
+);
+select is(
+  (select count(*)::int from public.tasks where parent_task_id = 'f2000000-0000-4000-8000-0000000000a1'
+      and source = 'exam_cram' and origin_exam_id = '11111111-0000-4000-8000-0000000000a3'),
+  2,
+  'the steps belong to the set and to the exam'
+);
+select is(
+  public.complete_mixed_set('f2000000-0000-4000-8000-0000000000a1', jsonb_build_array(
+    jsonb_build_object('task_id', 'f2000000-0000-4000-8000-0000000000a2', 'correct', 5),
+    jsonb_build_object('task_id', 'f2000000-0000-4000-8000-0000000000a3', 'correct', 1)
+  )) ->> 'completed',
+  '2',
+  'finishing a set scores every topic in one call'
+);
+select is(
+  (select status::text from public.tasks where id = 'f2000000-0000-4000-8000-0000000000a1'),
+  'completed',
+  'the set is done even though one topic went badly'
+);
+reset role;
+
+select is(
+  (select array[repetitions, interval_days] from public.topics where id = 'd0000000-0000-4000-8000-0000000000a6')
+    || array[(select next_review_on - public.user_today('aaaaaaaa-0000-4000-8000-000000000001')
+                from public.topics where id = 'd0000000-0000-4000-8000-0000000000a6')],
+  array[0, 1, 1],
+  'one of four right: that topic starts over and is back tomorrow'
+);
+select is(
+  (select repetitions from public.topics where id = 'd0000000-0000-4000-8000-0000000000a5'),
+  3,
+  'five of five right: that topic moves on'
+);
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+-- A second, untouched set; then the plan is made again from scratch.
+select lives_ok(
+  $$select public.apply_exam_cram_plan('11111111-0000-4000-8000-0000000000a3', jsonb_build_array(
+    jsonb_build_object('id', 'f2000000-0000-4000-8000-0000000000b1', 'topic_id', 'd0000000-0000-4000-8000-0000000000a5',
+      'type', 'mock_exam', 'title', 'Karışık tekrar · 4 soru', 'estimated_minutes', 16, 'due_date', current_date + 3),
+    jsonb_build_object('id', 'f2000000-0000-4000-8000-0000000000b2', 'parent_id', 'f2000000-0000-4000-8000-0000000000b1',
+      'topic_id', 'd0000000-0000-4000-8000-0000000000a6', 'type', 'problem_set', 'title', 'Konu 2 · 4 soru',
+      'target_count', 4, 'estimated_minutes', 16, 'due_date', current_date + 3)))$$,
+  'a second set is added'
+);
+select is(
+  public.apply_exam_cram_plan('11111111-0000-4000-8000-0000000000a3', '[]'::jsonb) ->> 'deleted',
+  '1',
+  'a new plan replaces the untouched set whole'
+);
+select is(
+  (select count(*)::int from public.tasks
+    where id in ('f2000000-0000-4000-8000-0000000000a1', 'f2000000-0000-4000-8000-0000000000a2',
+                 'f2000000-0000-4000-8000-0000000000a3', 'f2000000-0000-4000-8000-0000000000b1',
+                 'f2000000-0000-4000-8000-0000000000b2')),
+  3,
+  'the set already worked on stays, steps and all; the untouched one is gone with its steps'
+);
+reset role;
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select throws_ok(
+  $$select public.complete_mixed_set('f2000000-0000-4000-8000-0000000000a1', '[]'::jsonb)$$,
+  'P0002',
+  null,
+  'B cannot score A''s set'
 );
 reset role;
 

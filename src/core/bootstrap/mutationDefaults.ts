@@ -6,7 +6,7 @@ import {
   runSetBlockedWeekdays,
   runSetCapacityOverrides,
 } from '@entities/profile';
-import { taskMutationKeys, taskRepository, type TaskPatch, type TaskStatus } from '@entities/task';
+import { taskKeys, taskMutationKeys, taskRepository, type TaskPatch, type TaskStatus } from '@entities/task';
 import { taskNoteMutationKeys, taskNoteRepository } from '@entities/task-note';
 import { taskSessionMutationKeys, taskSessionRepository } from '@entities/task-session';
 import {
@@ -19,6 +19,7 @@ import {
   topicMistakeKeys,
   topicMistakeMutationKeys,
 } from '@entities/topic-mistake';
+import { runCompleteMixedSet } from '@features/mixed-set';
 import { runToggle } from '@features/task-toggle-status';
 import { queryClient } from '@shared/api/query';
 
@@ -59,6 +60,10 @@ export interface LogSessionVariables {
  */
 export function registerMutationDefaults(): void {
   queryClient.setMutationDefaults(taskMutationKeys.toggle, { mutationFn: runToggle });
+  queryClient.setMutationDefaults(taskMutationKeys.completeMixedSet, {
+    mutationFn: runCompleteMixedSet,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+  });
   queryClient.setMutationDefaults(taskMutationKeys.update, {
     mutationFn: ({ taskId, patch }: UpdateTaskVariables) => taskRepository.update(taskId, patch),
   });

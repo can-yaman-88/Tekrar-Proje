@@ -4,6 +4,7 @@ import { nextExamDaysByCourse, toExamChipModel, useUpcomingExams } from '@entiti
 import {
   cardGroupsOf,
   isDeadlineWork,
+  isMixedSet,
   TASK_GROUPS,
   useMissionTasks,
   useWeekTasks,
@@ -22,6 +23,7 @@ import {
   useSmartReminderSync,
   useWeeklySummaryReminder,
 } from '@features/reminders';
+import { useMixedSet } from '@features/mixed-set';
 import { useEnsureReviewTasks } from '@features/review-cycle';
 import { useToggleTaskStatus } from '@features/task-toggle-status';
 import { useQueuedChangeCount } from '@shared/api/query';
@@ -188,12 +190,17 @@ export function useMissionScreen() {
     }
   }, [refetchTasks, refetchExams]);
 
+  // A mixed set is finished by scoring each topic, not by ticking the box.
+  const mixedSet = useMixedSet();
+  const { open: openMixedSet } = mixedSet;
   const onToggle = useCallback(
     (taskId: string) => {
       const task = taskById.get(taskId);
-      if (task) toggle(task);
+      if (!task) return;
+      if (isMixedSet(task)) openMixedSet(task);
+      else toggle(task);
     },
-    [taskById, toggle],
+    [openMixedSet, taskById, toggle],
   );
 
   return {
@@ -242,6 +249,7 @@ export function useMissionScreen() {
       pendingTaskId,
     },
     rating,
+    mixedSet,
     offline:
       isOnline && queuedChanges === 0
         ? null

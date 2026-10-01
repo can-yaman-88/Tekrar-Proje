@@ -329,6 +329,27 @@ export class TaskRepository extends BaseRepository {
   }
 
   /**
+   * "Seti bitirdim": how many of each topic's problems were right, in one call.
+   * Each topic's accuracy becomes its review — below 60 % it comes back
+   * tomorrow — and the set counts as done either way. Sending it again
+   * replaces the earlier scores.
+   */
+  async completeMixedSet(
+    setId: string,
+    results: readonly { taskId: string; correct: number }[],
+    on: IsoDate = todayLocal(),
+  ): Promise<void> {
+    await this.execute(
+      'tasks.completeMixedSet',
+      this.db.rpc('complete_mixed_set', {
+        p_task_id: setId,
+        p_results: results.map((result) => ({ task_id: result.taskId, correct: result.correct })),
+        p_on: on,
+      }),
+    );
+  }
+
+  /**
    * "Grubu dağıt": every step becomes a task of its own, and the empty container
    * goes — deleted when nothing was done on it, set aside when something was.
    */

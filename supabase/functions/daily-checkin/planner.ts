@@ -307,7 +307,7 @@ export interface ScheduleFacts {
   /** Tasks closed by one "hepsini bitirdim", so the change list can say it in one line. */
   bulkCompletedTaskIds: string[];
   /** Sprint plans built for an exam, told as one line each rather than task by task. */
-  examPlans: { examId: string; tasks: number; days: number }[];
+  examPlans: { examId: string; tasks: number; days: number; mixedSets: number }[];
   swaps: { first: IsoDate; second: IsoDate }[];
   syllabusOrders: { from: IsoDate; until: IsoDate; moved: number }[];
   tidies: { from: IsoDate; until: IsoDate; paired: number }[];
@@ -1428,9 +1428,10 @@ export function planCheckinEffects({
       recordQuality(topicId, hard.has(topicId) ? HARD_TOPIC_QUALITY : outcome, logDate);
     }
     for (const task of tasks) {
-      if (task.originExamId === exam.id && task.source === 'exam_cram' && MOVABLE_STATUSES.has(task.status)) {
-        requestRemoval(task.id, 'Sınav geçti');
-      }
+      if (task.originExamId !== exam.id || task.source !== 'exam_cram' || !MOVABLE_STATUSES.has(task.status)) continue;
+      // A mixed set's step leaves with its set; the removal covers the group.
+      if (task.parentTaskId !== null && taskById.get(task.parentTaskId)?.originExamId === exam.id) continue;
+      requestRemoval(task.id, 'Sınav geçti');
     }
     examResults.push({
       exam_id: exam.id,
@@ -1470,7 +1471,12 @@ export function planCheckinEffects({
     notes.push(...cram.notes);
     for (const task of tasks) {
       if (task.originExamId !== exam.id || task.source !== 'exam_cram') continue;
-      if (task.status === 'pending' && task.completedCount === 0) requestRemoval(task.id, 'Sınav planı yenilendi');
+      // A set goes whole or not at all: its steps are never taken one by one,
+      // and a set with a step already worked on stays.
+      if (task.parentTaskId !== null) continue;
+      const steps = tasks.filter((step) => step.parentTaskId === task.id);
+      const untouched = (t: CandidateTask) => t.status === 'pending' && t.completedCount === 0;
+      if (untouched(task) && steps.every(untouched)) requestRemoval(task.id, 'Sınav planı yenilendi');
     }
     let added = 0;
     for (const item of cram.days.flatMap((day) => day.items)) {
@@ -1492,7 +1498,50 @@ export function planCheckinEffects({
       examLinks.push({ task_id: id, exam_id: exam.id });
       added++;
     }
-    examPlans.push({ examId: exam.id, tasks: added, days: cram.days.length });
+    // Mixed sets: the set is the container, each topic a step under it, so
+    // each topic's score reaches its own review schedule.
+    let mixedSets = 0;
+    for (const set of cram.mixedSets) {
+      if (cramRows.length + 1 + set.parts.length > MAX_CRAM_TASKS) break;
+      const parts = set.parts.filter((part) => topicById.has(part.topicId));
+      const lead = parts[0];
+      if (lead === undefined || parts.length < 2) continue;
+      const setId = crypto.randomUUID();
+      cramRows.push({
+        id: setId,
+        parent_task_id: null,
+        topic_id: lead.topicId,
+        type: 'mock_exam',
+        title: set.title,
+        instructions: set.instructions,
+        target_count: null,
+        estimated_minutes: set.estimatedMinutes,
+        due_date: set.dueDate,
+        source: 'exam_cram',
+        rescheduled_from_task_id: null,
+      });
+      examLinks.push({ task_id: setId, exam_id: exam.id });
+      for (const part of parts) {
+        const stepId = crypto.randomUUID();
+        cramRows.push({
+          id: stepId,
+          parent_task_id: setId,
+          topic_id: part.topicId,
+          type: 'problem_set',
+          title: part.title,
+          instructions: part.instructions,
+          target_count: part.problems,
+          estimated_minutes: part.minutes,
+          due_date: set.dueDate,
+          source: 'exam_cram',
+          rescheduled_from_task_id: null,
+        });
+        examLinks.push({ task_id: stepId, exam_id: exam.id });
+      }
+      added++;
+      mixedSets++;
+    }
+    examPlans.push({ examId: exam.id, tasks: added, days: cram.days.length, mixedSets });
   }
 
   // --- "Fizik ödevi acil" — and "artık acil değil". Urgency belongs to the

@@ -1,4 +1,5 @@
 import { ConfidenceSheet } from '@entities/topic';
+import { MixedSetSheet } from '@features/mixed-set';
 import { GeneratePlanButton } from '@features/weekly-plan';
 import { AppText, EmptyState, ErrorState, Screen } from '@shared/ui';
 import { Pressable, View } from 'react-native';
@@ -122,6 +123,7 @@ export function MissionScreen() {
         }
       />
       <ConfidenceSheet {...vm.rating} secondary={{ label: 'Puanlamadan bitir', onPress: vm.rating.onSkip }} />
+      <MixedSetSheet controller={vm.mixedSet} />
     </Screen>
   );
 }

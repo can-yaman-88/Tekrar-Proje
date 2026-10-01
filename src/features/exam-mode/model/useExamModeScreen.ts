@@ -1,7 +1,15 @@
-import { daysUntil, EXAM_KIND_LABEL, useApplyCramPlan, useApplyExamRetro, useExamMode as useExamModeQuery } from '@entities/exam';
+import {
+  daysUntil,
+  EXAM_KIND_LABEL,
+  useApplyCramPlan,
+  useApplyExamRetro,
+  useExamMode as useExamModeQuery,
+  type CramTaskInput,
+} from '@entities/exam';
 import { taskKeys } from '@entities/task';
 import { mistakeLabel, useTopicMistakesFor } from '@entities/topic-mistake';
 import { useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { formatLongDate, todayLocal } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
@@ -87,7 +95,7 @@ export function useExamModeScreen(examId: string, { capacityByWeekday }: ExamMod
 
   const onCreateTasks = useCallback(() => {
     if (!context || !plan) return;
-    const tasks = plan.days.flatMap((day) =>
+    const steps: CramTaskInput[] = plan.days.flatMap((day) =>
       day.items.map((item) => ({
         topic_id: item.topicId,
         type: item.type,
@@ -98,6 +106,37 @@ export function useExamModeScreen(examId: string, { capacityByWeekday }: ExamMod
         due_date: item.dueDate,
       })),
     );
+    // A mixed set is a container with one step per topic: each topic's score
+    // then reaches its own review schedule.
+    const sets: CramTaskInput[] = plan.mixedSets.flatMap((set) => {
+      const id = Crypto.randomUUID();
+      const lead = set.parts[0];
+      if (!lead) return [];
+      return [
+        {
+          id,
+          topic_id: lead.topicId,
+          type: 'mock_exam' as const,
+          title: set.title,
+          instructions: set.instructions,
+          target_count: null,
+          estimated_minutes: set.estimatedMinutes,
+          due_date: set.dueDate,
+        },
+        ...set.parts.map((part) => ({
+          id: Crypto.randomUUID(),
+          parent_id: id,
+          topic_id: part.topicId,
+          type: 'problem_set' as const,
+          title: part.title,
+          instructions: part.instructions,
+          target_count: part.problems,
+          estimated_minutes: part.minutes,
+          due_date: set.dueDate,
+        })),
+      ];
+    });
+    const tasks = [...steps, ...sets];
     if (tasks.length === 0) {
       showToast('Eklenecek adım yok.', 'info');
       return;
@@ -107,7 +146,11 @@ export function useExamModeScreen(examId: string, { capacityByWeekday }: ExamMod
       {
         onSuccess: (result) => {
           refreshTasks();
-          showToast(`${result.inserted} görev eklendi.`, 'success');
+          const setCount = plan.mixedSets.length;
+          showToast(
+            `${result.inserted - result.steps} görev eklendi${setCount > 0 ? `; ${setCount} tanesi karışık tekrar seti` : ''}.`,
+            'success',
+          );
         },
         onError: (error) => showToast(describeError(error).title, 'danger'),
       },
@@ -168,6 +211,13 @@ export function useExamModeScreen(examId: string, { capacityByWeekday }: ExamMod
         key: `${item.topicId}-${item.step}`,
         title: item.title,
         minutes: item.estimatedMinutes,
+      })),
+      sets: day.sets.map((set) => ({
+        key: set.key,
+        title: set.title,
+        minutes: set.estimatedMinutes,
+        legend: set.parts.map((part) => `${part.letter}: ${part.topicTitle} (${part.problems})`).join(' · '),
+        sequence: set.sequence.join(' '),
       })),
     })),
     notes: plan?.notes ?? [],

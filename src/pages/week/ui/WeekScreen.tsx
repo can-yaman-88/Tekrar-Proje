@@ -1,5 +1,6 @@
 import { TaskCard, TaskCardSkeleton } from '@entities/task';
 import { ConfidenceSheet } from '@entities/topic';
+import { MixedSetSheet } from '@features/mixed-set';
 import { AppText, EmptyState, ErrorState, Screen, makeStyles, useTheme } from '@shared/ui';
 import { TaskGroupFilter } from '@widgets/task-group-filter';
 import { Pressable, RefreshControl, SectionList, View } from 'react-native';
@@ -118,6 +119,7 @@ export function WeekScreen() {
         }
       />
       <ConfidenceSheet {...vm.rating} secondary={{ label: 'Puanlamadan bitir', onPress: vm.rating.onSkip }} />
+      <MixedSetSheet controller={vm.mixedSet} />
     </Screen>
   );
 }

@@ -15,6 +15,7 @@ export {
   editableGroupOf,
   isDeadlineWork,
   isHomework,
+  isMixedSet,
   isReviewTask,
   taskGroupOf,
   withStatus,

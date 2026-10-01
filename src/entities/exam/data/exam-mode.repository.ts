@@ -33,6 +33,10 @@ export interface ExamModeContext {
 }
 
 export interface CramTaskInput {
+  /** Chosen on the device when a step has to point at it (a mixed set). */
+  id?: string;
+  /** The set this step belongs to; it must be in the same call. */
+  parent_id?: string | null;
   topic_id: string;
   type: TaskType;
   title: string;
@@ -136,13 +140,16 @@ export class ExamModeRepository extends BaseRepository {
   }
 
   /** Replaces this exam's untouched sprint tasks with the current plan. */
-  async applyCramPlan(examId: string, tasks: readonly CramTaskInput[]): Promise<{ deleted: number; inserted: number }> {
+  async applyCramPlan(
+    examId: string,
+    tasks: readonly CramTaskInput[],
+  ): Promise<{ deleted: number; inserted: number; steps: number }> {
     const result = await this.execute(
       'exam_mode.applyCramPlan',
       this.db.rpc('apply_exam_cram_plan', { p_exam_id: examId, p_tasks: tasks as unknown as Json }),
     );
-    const payload = result as { deleted?: number; inserted?: number } | null;
-    return { deleted: payload?.deleted ?? 0, inserted: payload?.inserted ?? 0 };
+    const payload = result as { deleted?: number; inserted?: number; steps?: number } | null;
+    return { deleted: payload?.deleted ?? 0, inserted: payload?.inserted ?? 0, steps: payload?.steps ?? 0 };
   }
 
   /**

@@ -97,6 +97,13 @@ export function ExamModeScreen() {
         ) : (
           <Card style={styles.card}>
             <AppText variant="subtitle">Kalan günlerin planı</AppText>
+            {vm.planDays.some((day) => day.sets.length > 0) ? (
+              <AppText variant="caption" tone="muted">
+                Karışık tekrar setinde konular sırayla değil karışık gelir: sınavdaki gibi her soruda önce hangi
+                konu olduğunu ve hangi yöntemi kullanacağını bulursun. Bitince her konu için kaç doğru yaptığını
+                işaretlersin; zorlandığın konu tekrar takviminde öne gelir.
+              </AppText>
+            ) : null}
             {vm.planDays.length === 0 ? (
               <AppText tone="muted">Planlanacak adım kalmadı; konuların hazır görünüyor.</AppText>
             ) : (
@@ -112,6 +119,19 @@ export function ExamModeScreen() {
                     <AppText key={item.key} variant="caption" tone="muted">
                       · {item.title} ({item.minutes} dk)
                     </AppText>
+                  ))}
+                  {day.sets.map((set) => (
+                    <View key={set.key} style={styles.mixedSet}>
+                      <AppText variant="caption">
+                        {set.title} ({set.minutes} dk)
+                      </AppText>
+                      <AppText variant="caption" tone="muted">
+                        {set.legend}
+                      </AppText>
+                      <AppText variant="caption" tone="muted">
+                        Sıra: {set.sequence}
+                      </AppText>
+                    </View>
                   ))}
                 </View>
               ))
@@ -220,6 +240,13 @@ const useStyles = makeStyles(({ spacing, colors, radii }) => ({
   mistake: { marginLeft: spacing.sm },
   detail: { width: 84, textAlign: 'right' },
   day: { gap: spacing.xxs, marginTop: spacing.xs },
+  mixedSet: {
+    gap: spacing.xxs,
+    marginTop: spacing.xxs,
+    paddingLeft: spacing.sm,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.primary,
+  },
   dayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   options: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs },
   option: {

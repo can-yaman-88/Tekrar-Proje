@@ -1,4 +1,12 @@
-import { isHomework, nextStatusOnToggle, taskKeys, taskMutationKeys, taskRepository, type Task } from '@entities/task';
+import {
+  isHomework,
+  isMixedSet,
+  nextStatusOnToggle,
+  taskKeys,
+  taskMutationKeys,
+  taskRepository,
+  type Task,
+} from '@entities/task';
 import { reviewKeys, topicKeys } from '@entities/topic';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
@@ -40,6 +48,9 @@ export function useSubtasks(task: Task, { onUngrouped }: { onUngrouped?: () => v
 
   const rows = subtasks.data ?? [];
   const canAdd = isHomework(task) || rows.length > 0;
+  // A mixed set's steps are one topic each, laid out by the exam plan: they
+  // are scored, not added to, removed or scattered.
+  const canEdit = !isMixedSet(task);
 
   const invalidate = useCallback(
     () => queryClient.invalidateQueries({ queryKey: taskKeys.all }),
@@ -85,6 +96,7 @@ export function useSubtasks(task: Task, { onUngrouped }: { onUngrouped?: () => v
 
   return {
     canAdd,
+    canEdit,
     isLoading: subtasks.isPending && canAdd,
     rows: rows.map((step) => ({
       id: step.id,
@@ -114,7 +126,7 @@ export function useSubtasks(task: Task, { onUngrouped }: { onUngrouped?: () => v
     onRemove: (subtaskId: string) => remove.mutate(subtaskId),
     isRemoving: remove.isPending,
     /** Only a task that has steps can be taken apart. */
-    canUngroup: rows.length > 0 && task.parentTaskId === null,
+    canUngroup: canEdit && rows.length > 0 && task.parentTaskId === null,
     onUngroup: () => ungroup.mutate(),
     isUngrouping: ungroup.isPending,
   };

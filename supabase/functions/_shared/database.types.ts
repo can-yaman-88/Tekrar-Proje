@@ -49,7 +49,7 @@ export type Database = {
           app_version?: string | null
           created_at?: string
           detail?: Json | null
-          fingerprint?: never
+          fingerprint?: string | null
           id?: string
           kind: string
           message: string
@@ -61,7 +61,7 @@ export type Database = {
           app_version?: string | null
           created_at?: string
           detail?: Json | null
-          fingerprint?: never
+          fingerprint?: string | null
           id?: string
           kind?: string
           message?: string
@@ -1491,6 +1491,10 @@ export type Database = {
         Returns: number
       }
       clear_llm_api_key: { Args: never; Returns: undefined }
+      complete_mixed_set: {
+        Args: { p_on?: string; p_results: Json; p_task_id: string }
+        Returns: Json
+      }
       configure_weekly_plan_cron: {
         Args: { p_function_url: string; p_service_key: string }
         Returns: string

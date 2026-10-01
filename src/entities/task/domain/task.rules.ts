@@ -18,6 +18,13 @@ export const isHomework = (task: Pick<Task, 'source'>): boolean => HOMEWORK_SOUR
 export const isReviewTask = (task: Pick<Task, 'source'>): boolean => task.source === 'spaced_repetition';
 
 /**
+ * A pre-exam mixed set: the container whose steps are one topic each. It is
+ * finished by scoring each topic, not by ticking the box.
+ */
+export const isMixedSet = (task: Pick<Task, 'type' | 'parentTaskId'>): boolean =>
+  task.type === 'mock_exam' && task.parentTaskId === null;
+
+/**
  * Work that has to be spread over the days before its deadline.
  *
  * Only homework qualifies: the weekly planner already chose a day for every
@@ -173,7 +180,7 @@ export const TASK_TYPE_LABEL: Record<TaskType, string> = {
   quiz: 'Sınav',
   advanced_problems: 'Sınav · ileri seviye',
   problem_set: 'Sınav',
-  mock_exam: 'Sınav',
+  mock_exam: 'Karışık set',
   feynman: 'Feynman',
   derivation: 'Feynman',
   spaced_review: 'Feynman',

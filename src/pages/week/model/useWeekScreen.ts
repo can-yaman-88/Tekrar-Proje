@@ -1,5 +1,15 @@
 import type { IsoDate } from '@contracts/enums.contract';
-import { cardGroupsOf, TASK_GROUPS, toTaskCardModel, useWeekTasks, type Task, type TaskCardModel, type TaskGroup } from '@entities/task';
+import {
+  cardGroupsOf,
+  isMixedSet,
+  TASK_GROUPS,
+  toTaskCardModel,
+  useWeekTasks,
+  type Task,
+  type TaskCardModel,
+  type TaskGroup,
+} from '@entities/task';
+import { useMixedSet } from '@features/mixed-set';
 import { useToggleTaskStatus } from '@features/task-toggle-status';
 import { addDays, formatLongDate, todayLocal, useToday, weekStartOf } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
@@ -29,6 +39,8 @@ export function useWeekScreen() {
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const query = useWeekTasks(weekStart, weekEnd);
   const { toggle, pendingTaskId, rating } = useToggleTaskStatus(todayLocal());
+  // A mixed set is finished by scoring each topic, not by ticking the box.
+  const mixedSet = useMixedSet();
 
   const tasks = useMemo(() => query.data ?? [], [query.data]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
@@ -125,10 +137,13 @@ export function useWeekScreen() {
     refresh,
     onToggle: (taskId: string) => {
       const task = taskById.get(taskId);
-      if (task) toggle(task);
+      if (!task) return;
+      if (isMixedSet(task)) mixedSet.open(task);
+      else toggle(task);
     },
     onPressTask: (taskId: string) => router.push(`/task/${taskId}`),
     pendingTaskId,
     rating,
+    mixedSet,
   };
 }

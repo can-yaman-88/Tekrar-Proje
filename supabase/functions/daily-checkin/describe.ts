@@ -271,7 +271,9 @@ export function describePlan({
       'added',
       sprint.tasks === 0
         ? `${title} için eklenecek adım çıkmadı.`
-        : `${title} için sınav planı: ${sprint.tasks} adım, ${sprint.days} güne yayıldı.`,
+        : `${title} için sınav planı: ${sprint.tasks} adım, ${sprint.days} güne yayıldı${
+            sprint.mixedSets > 0 ? `; ${sprint.mixedSets} karışık tekrar seti dahil` : ''
+          }.`,
     );
   }
   for (const flag of plan.priorities) {

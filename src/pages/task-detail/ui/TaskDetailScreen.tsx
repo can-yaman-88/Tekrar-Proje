@@ -1,5 +1,7 @@
 import { NoteItem } from '@entities/task-note';
 import { MistakeList } from '@entities/topic-mistake';
+import { isMixedSet } from '@entities/task';
+import { MixedSetCard, MixedSetSheet, useMixedSet } from '@features/mixed-set';
 import { NoteComposer } from '@features/task-note-add';
 import { PriorityToggle, useTaskPriority } from '@features/task-priority';
 import { TaskTimerCard } from '@features/task-timer';
@@ -15,6 +17,7 @@ import { TaskSubtaskSection } from './TaskSubtaskSection';
 export function TaskDetailScreen() {
   const { taskId } = useLocalSearchParams<{ taskId: string }>();
   const detail = useTaskDetail(taskId);
+  const mixedSet = useMixedSet();
   const priority = useTaskPriority(detail.task);
   const styles = useStyles();
 
@@ -84,6 +87,8 @@ export function TaskDetailScreen() {
             resolvingId={detail.resolvingMistakeId}
           />
 
+          {isMixedSet(detail.task) ? <MixedSetCard task={detail.task} controller={mixedSet} /> : null}
+
           <TaskSubtaskSection task={detail.task} />
 
           {detail.showsAllocation ? <TaskAllocationSection task={detail.task} /> : null}
@@ -117,6 +122,7 @@ export function TaskDetailScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <MixedSetSheet controller={mixedSet} />
     </Screen>
   );
 }

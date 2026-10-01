@@ -52,7 +52,7 @@ npx tsc --noEmit        # tip kontrolü
 npx expo lint           # katman sınırları dahil
 npx jest                # alan (domain) ve altyapı testleri (ayar: jest.config.js)
 npx expo-doctor         # bağımlılık uyumu
-npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 123 test)
+npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 133 test)
 ```
 
 Edge Function testleri (Deno kurulu değilse Docker ile):
@@ -235,7 +235,25 @@ satırı) sınav ekranı açılır:
   döngü sırayla tamamlanır (konsept → Feynman → sınav), döngüsü bitmiş sağlam konuya yalnızca
   hatırlama turu düşer. Sınav günü çalışma günü sayılmaz, sınavdan önceki akşam kısa tutulur.
   **Planı görevlere ekle** dediğinde bu adımlar gerçek göreve dönüşür; planı yeniden
-  oluşturursan dokunulmamış eski sprint görevleri silinir, başladıkların korunur.
+  oluşturursan dokunulmamış eski sprint görevleri silinir, başladıkların korunur. Kapattığın
+  günlere (ve arifeye ağır iş) konmaz.
+- **Karışık tekrar seti**: sınava **4 ve 2 gün kala** (o gün dolu ya da kapalıysa bir gün öncesi
+  ya da sonrası; arifeye asla) birkaç konunun sorularını tek oturumda, **karışık sırayla** çözdüren
+  bir görev. Sınav da konuları sırayla sormaz; her soruda önce "bu hangi konu, hangi yöntem?" diye
+  düşünmek, konu konu çalışmanın hiç çalıştırmadığı beceridir.
+  - Sete yalnızca döngüsü o güne kadar bitmiş konular girer (en az 2, en çok 4); iki set varsa
+    ikincisi önce henüz sette olmamış konuları alır.
+  - Soru sayısı günün kalan yerine göre 6–12; her konuya en az 2 soru, gerisi zayıflığa göre
+    (zayıf 3, orta 2, sağlam 1 pay). En zayıf konu **A** olur.
+  - Sıra her konunun sorularını oturuma eşit yayar ve aynı konuyu art arda vermez
+    ("Sıra: A B C A B A C B A C B A"); her konunun adımı kendi soru numaralarını yazar.
+  - Set, Görevler'de tek kart; altında her konu bir adım. Kartın kutusuna basınca **"Set nasıl
+    geçti?"** açılır: her konu için kaç doğru yaptığını seçersin. Her konunun isabeti kendi
+    tekrar takvimine yazılır — **%60'ın altı o konuyu sıfırlar, yarın yeniden gelir**; set yine
+    de bitmiş sayılır. Yanlış girdiysen görev ekranından **Puanları düzelt**. Çevrimdışıyken de
+    çalışır.
+  - Değerlendirmede "vize için plan çıkar" dediğinde de aynı setler kurulur. Plan yenilenirken
+    set bütün olarak gider ya da kalır: bir konusuna başladığın set bölünmez.
 - **Sınav nasıl geçti?**: sınav geçtikten sonra tek soru + zorlandığın konuları işaretleme.
   Cevap, sınavın kapsadığı konuların tekrar takvimine SM-2 ile yazılır: kötü geçtiyse konular
   başa döner, iyi geçtiyse aralık uzar, işaretlediğin konu sınav iyi geçse de tekrara döner.
@@ -391,10 +409,11 @@ olarak görünür, adımlar kartın içinde tek tek işaretlenir. Ana görevin d
 değişmez — **adımlarından hesaplanır** (hepsi bitti → tamamlandı, biri geri alındı → devam
 ediyor); bu veritabanı tetikleyicisiyle yürür, yani kim yazarsa yazsın tutarlı kalır.
 
-Alt adımlar **her göreve açık değildir**. Yalnızca iki yoldan doğar: değerlendirmede bildirdiğin
-**ödevler** ("üç bölümü var: …") ve **açık istek** ("fizik ödevini üç adıma böl"). Haftalık plan,
-tekrar döngüsü, telafi görevleri ve sınav sprinti alt adım üretmez; konsept/Feynman/sınav
-görevleri tek parça kalır. Tek seviye: alt adımın alt adımı olmaz, veritabanı buna izin vermez.
+Alt adımlar **her göreve açık değildir**. Yalnızca şu yollardan doğar: değerlendirmede bildirdiğin
+**ödevler** ("üç bölümü var: …"), **açık istek** ("fizik ödevini üç adıma böl"), haftalık planın
+**öğrenme kartı** (konsept + Feynman) ve sınav planının **karışık tekrar seti** (konu başına bir
+adım; bunlar düzenlenmez, set bitirilirken puanlanır). Tekrar döngüsü ve telafi görevleri alt adım
+üretmez. Tek seviye: alt adımın alt adımı olmaz, veritabanı buna izin vermez.
 
 Alt adımı olan bir ödevde günlere bölme **adımlar üzerinden** yürür: her adım kendi gününü alır,
 ana görev yalnızca kapsayıcıdır.
@@ -550,7 +569,7 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 123 pgTAP testi
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 133 pgTAP testi
   bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
   satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
 - **Görev durumu tek kapıdan değişir.** `guard_task_status` tetikleyicisi, uygulamanın
