@@ -1,0 +1,15 @@
+-- The learning task: one card for the sitting the student actually does.
+--
+-- Konsept sayfası and Feynman anlatımı are not two pieces of work, they are one
+-- sitting with two halves — the student writes the page, then closes it and
+-- retells the topic on a blank sheet. Planning them as two independent tasks
+-- was what let them drift onto different days.
+--
+-- From now on the pair is created as ONE task with two steps under it. The
+-- container needs a type of its own: reusing 'concept_note' would make the
+-- weekly planner believe the topic already has its concept step and skip
+-- planning the real one (see isStudyStep in generate-weekly-plan/repository.ts).
+--
+-- Kept in its own migration: Postgres forbids using a new enum value in the
+-- same transaction that adds it.
+alter type public.task_type add value if not exists 'learning';

@@ -24,10 +24,21 @@ export interface LearnedCapacity {
   observedWeeks: number;
 }
 
-export const DEFAULT_DAILY_CAPACITY = 120;
+/**
+ * A day's study budget until the student's own history says otherwise. Class
+ * hours still come off it; at 120 a weekday with four classes fell to the
+ * 30-minute floor and no concept+Feynman sitting (55 minutes) ever fit.
+ */
+export const DEFAULT_DAILY_CAPACITY = 150;
 export const MIN_CAPACITY = 30;
 /** A long Saturday is real; a 12-hour "day" in the data is a timer left running. */
 export const MAX_CAPACITY = 480;
+/**
+ * However full the timetable, a guessed day keeps room for one concept +
+ * Feynman sitting (55 minutes). Never more than the day's own budget, though:
+ * a day the student rarely studies stays what it is.
+ */
+export const CLASS_DAY_FLOOR = 60;
 /** Below this many observed occurrences a weekday keeps the default. */
 const MIN_OBSERVATIONS = 2;
 /**
@@ -337,7 +348,8 @@ export function resolveCapacity({ today, finished, timed, blockedWeekdays = [], 
 export function planningBudget(day: Pick<WeekdayCapacity, 'minutes' | 'source'>, classMinutes: number): number {
   if (day.source === 'blocked' || day.minutes <= 0) return 0;
   if (day.source === 'learned' || day.source === 'override') return day.minutes;
-  return Math.max(MIN_CAPACITY, Math.round(day.minutes - classMinutes * CLASS_MINUTE_COST));
+  const floor = Math.min(day.minutes, CLASS_DAY_FLOOR);
+  return Math.max(floor, Math.round(day.minutes - classMinutes * CLASS_MINUTE_COST));
 }
 
 /**

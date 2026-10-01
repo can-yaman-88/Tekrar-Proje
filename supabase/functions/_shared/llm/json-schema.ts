@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { LlmError } from '../errors.ts';
 import { assertResponseShape, assertResponseSize, assertSchemaIsPortable } from './guards.ts';
+import type { StructuredRequest } from './provider.ts';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject {
@@ -61,8 +62,15 @@ export function toStrictJsonSchema(schema: z.ZodType): JsonObject {
   return strict;
 }
 
-/** Parses provider text as JSON and validates it; both failures are `invalid_output`. */
-export function parseStructured<T>(text: string, schema: z.ZodType<T>): T {
+/**
+ * Parses provider text as JSON and validates it; both failures are `invalid_output`.
+ * With `salvage`, an answer that fails validation keeps whatever passes on its own.
+ */
+export function parseStructured<T>(
+  text: string,
+  schema: z.ZodType<T>,
+  salvage?: StructuredRequest<T>['salvage'],
+): T {
   assertResponseSize(text);
 
   let json: unknown;
@@ -76,6 +84,18 @@ export function parseStructured<T>(text: string, schema: z.ZodType<T>): T {
   assertResponseShape(json);
 
   const result = schema.safeParse(json);
+  const rescued = result.success ? null : (salvage?.(json) ?? null);
+  if (rescued) {
+    console.warn(
+      JSON.stringify({
+        event: 'llm_output_salvaged',
+        issues: result.error?.issues.length ?? 0,
+        droppedItems: rescued.droppedItems,
+        preview: text.slice(0, 400),
+      }),
+    );
+    return rescued.data;
+  }
   if (!result.success) {
     // The raw answer helps debugging but must not reach the student.
     console.warn(

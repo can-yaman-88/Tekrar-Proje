@@ -1,6 +1,6 @@
 import type { IsoDate } from '@contracts/enums.contract';
 import { BaseRepository } from '@shared/api/repository';
-import { fromPostgrestError } from '@shared/lib/errors';
+import { AppError, fromPostgrestError } from '@shared/lib/errors';
 import { addDays, todayLocal } from '@shared/lib/date';
 import type { Task, TaskPatch, TaskStatus } from '../domain/task.types';
 import { TASK_SELECT, toTask } from './task.mapper';
@@ -244,6 +244,31 @@ export class TaskRepository extends BaseRepository {
     );
   }
 
+  /**
+   * Gathers a topic's concept page and Feynman page under one learning task.
+   *
+   * One RPC rather than an insert plus an update: a container that exists
+   * without its steps is a card on the board that means nothing, and the
+   * student would have no way to undo the half of it that landed. The database
+   * re-checks every condition — ownership, open, untouched, one topic — because
+   * the device is not where that decision is safe to make.
+   */
+  async groupIntoLearningTask(input: {
+    childIds: readonly string[];
+    title: string;
+    dueDate: IsoDate;
+  }): Promise<string> {
+    const id = await this.execute(
+      'tasks.groupIntoLearningTask',
+      this.db.rpc('group_learning_pair', {
+        p_child_ids: [...input.childIds],
+        p_title: input.title,
+        p_due_date: input.dueDate,
+      }),
+    );
+    return id;
+  }
+
   async update(taskId: string, patch: TaskPatch): Promise<Task> {
     const row = await this.execute(
       'tasks.update',
@@ -268,7 +293,22 @@ export class TaskRepository extends BaseRepository {
     return toTask(row);
   }
 
+  /**
+   * Deletes one task.
+   *
+   * A task with steps is refused rather than deleted: the foreign key cascades,
+   * so removing a learning task or a group homework would take its steps with
+   * it — including the one the student has already worked through. Emptying the
+   * group first is a decision, and it is theirs to make step by step.
+   */
   async remove(taskId: string): Promise<void> {
+    const steps = await this.execute(
+      'tasks.removeStepCheck',
+      this.db.from('tasks').select('id').eq('parent_task_id', taskId).limit(1),
+    );
+    if (steps.length > 0) {
+      throw new AppError('validation', 'Bu görevin adımları var; önce adımlarını sil.');
+    }
     await this.execute('tasks.remove', this.db.from('tasks').delete().eq('id', taskId).select('id').single());
   }
 
@@ -286,6 +326,25 @@ export class TaskRepository extends BaseRepository {
         .order('created_at', { ascending: true }),
     );
     return rows.map(toTask);
+  }
+
+  /**
+   * "Grubu dağıt": every step becomes a task of its own, and the empty container
+   * goes — deleted when nothing was done on it, set aside when something was.
+   */
+  async ungroup(parentId: string): Promise<{ freed: number; container: 'removed' | 'set_aside' | 'kept' }> {
+    const result = await this.execute('tasks.ungroup', this.db.rpc('ungroup_task', { p_parent_id: parentId }));
+    const payload = result as { freed?: number; container?: 'removed' | 'set_aside' | 'kept' } | null;
+    return { freed: payload?.freed ?? 0, container: payload?.container ?? 'kept' };
+  }
+
+  /** "Acil" — the same flag a report sets with "fizik ödevi acil". */
+  async setPriority(taskId: string, isPriority: boolean): Promise<Task> {
+    const row = await this.execute(
+      'tasks.setPriority',
+      this.db.from('tasks').update({ is_priority: isPriority }).eq('id', taskId).select(TASK_SELECT).single(),
+    );
+    return toTask(row);
   }
 
   /**

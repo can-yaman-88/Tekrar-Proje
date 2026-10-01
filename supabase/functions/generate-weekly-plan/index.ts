@@ -46,11 +46,15 @@ Deno.serve(
     if (!isCron) await enforceRateLimit(service, userId, 'weekly_plan');
 
     const repo = new WeeklyPlanRepository(service, userId);
-    const weekStart = weekStartOf(body.weekStart ?? (await repo.localToday()));
+    // The phone sends its own date; the Monday job sends none, and its "today"
+    // is the student's own, in their time zone — never the server's UTC day.
+    const today = body.today ?? (await repo.localToday());
+    const weekStart = weekStartOf(body.weekStart ?? today);
     const context = await repo.loadContext(weekStart, addDays(weekStart, 6));
 
     const { weekEnd, slots, notes } = planWeek({
       weekStart,
+      today,
       topics: context.topics,
       exams: context.exams,
       commitments: context.commitments,

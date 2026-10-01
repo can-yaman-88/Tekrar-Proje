@@ -241,6 +241,51 @@ export type Database = {
           },
         ]
       }
+      daily_log_extras: {
+        Row: {
+          created_at: string
+          daily_log_id: string
+          id: string
+          kind: string
+          previous: Json | null
+          target_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_log_id: string
+          id?: string
+          kind: string
+          previous?: Json | null
+          target_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_log_id?: string
+          id?: string
+          kind?: string
+          previous?: Json | null
+          target_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_log_extras_log_fk"
+            columns: ["daily_log_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "daily_logs"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "daily_log_extras_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       daily_log_task_deletions: {
         Row: {
           created_at: string
@@ -445,6 +490,7 @@ export type Database = {
           previous_blocked_weekdays: number[] | null
           processed_at: string | null
           raw_text: string
+          result: Json | null
           reverted_at: string | null
           status: Database["public"]["Enums"]["processing_status"]
           summary: string | null
@@ -460,6 +506,7 @@ export type Database = {
           previous_blocked_weekdays?: number[] | null
           processed_at?: string | null
           raw_text: string
+          result?: Json | null
           reverted_at?: string | null
           status?: Database["public"]["Enums"]["processing_status"]
           summary?: string | null
@@ -475,6 +522,7 @@ export type Database = {
           previous_blocked_weekdays?: number[] | null
           processed_at?: string | null
           raw_text?: string
+          result?: Json | null
           reverted_at?: string | null
           status?: Database["public"]["Enums"]["processing_status"]
           summary?: string | null
@@ -879,6 +927,7 @@ export type Database = {
           estimated_minutes: number | null
           id: string
           instructions: string | null
+          is_priority: boolean
           origin_daily_log_id: string | null
           origin_exam_id: string | null
           parent_task_id: string | null
@@ -904,6 +953,7 @@ export type Database = {
           estimated_minutes?: number | null
           id?: string
           instructions?: string | null
+          is_priority?: boolean
           origin_daily_log_id?: string | null
           origin_exam_id?: string | null
           parent_task_id?: string | null
@@ -929,6 +979,7 @@ export type Database = {
           estimated_minutes?: number | null
           id?: string
           instructions?: string | null
+          is_priority?: boolean
           origin_daily_log_id?: string | null
           origin_exam_id?: string | null
           parent_task_id?: string | null
@@ -1264,9 +1315,32 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_checkin_exam_scopes: {
+        Args: { p_daily_log_id: string; p_scopes?: Json; p_user_id: string }
+        Returns: number
+      }
+      apply_checkin_extras: {
+        Args: {
+          p_daily_log_id: string
+          p_exam_links?: Json
+          p_exam_results?: Json
+          p_extra_work?: Json
+          p_priorities?: Json
+          p_user_id: string
+        }
+        Returns: Json
+      }
       apply_checkin_mistakes: {
         Args: { p_daily_log_id: string; p_mistakes: Json; p_user_id: string }
         Returns: number
+      }
+      apply_checkin_reopen_weekdays: {
+        Args: { p_daily_log_id: string; p_user_id: string; p_weekdays?: Json }
+        Returns: number[]
+      }
+      apply_checkin_ungroup: {
+        Args: { p_daily_log_id: string; p_parent_ids?: Json; p_user_id: string }
+        Returns: Json
       }
       apply_daily_checkin: {
         Args: {
@@ -1359,6 +1433,10 @@ export type Database = {
         }
         Returns: Json
       }
+      group_learning_pair: {
+        Args: { p_child_ids: string[]; p_due_date: string; p_title: string }
+        Returns: string
+      }
       hit_rate_limit: {
         Args: {
           p_bucket: string
@@ -1434,6 +1512,7 @@ export type Database = {
         Args: { p_task_id: string; p_user_id: string }
         Returns: boolean
       }
+      ungroup_task: { Args: { p_parent_id: string }; Returns: Json }
       unregister_push_token: { Args: { p_token: string }; Returns: undefined }
       user_today: { Args: { p_user_id: string }; Returns: string }
     }
@@ -1465,6 +1544,7 @@ export type Database = {
         | "quiz"
         | "feynman"
         | "advanced_problems"
+        | "learning"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1618,6 +1698,7 @@ export const Constants = {
         "quiz",
         "feynman",
         "advanced_problems",
+        "learning",
       ],
     },
   },

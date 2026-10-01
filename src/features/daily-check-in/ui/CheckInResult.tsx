@@ -1,7 +1,23 @@
-import type { DailyCheckinResponse } from '@contracts/daily-checkin.contract';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import type { CheckinChangeKind, DailyCheckinResponse } from '@contracts/daily-checkin.contract';
 import { formatRelativeDay, formatShortDate, todayLocal } from '@shared/lib/date';
-import { AppText, Button, Card, makeStyles } from '@shared/ui';
+import { AppText, Button, Card, type ColorTokens, makeStyles, useTheme } from '@shared/ui';
+import type { ComponentProps } from 'react';
 import { View } from 'react-native';
+
+type IconName = ComponentProps<typeof Ionicons>['name'];
+
+const KIND_ICON: Record<CheckinChangeKind, { icon: IconName; color: keyof ColorTokens }> = {
+  done: { icon: 'checkmark-circle', color: 'success' },
+  progress: { icon: 'trending-up', color: 'primary' },
+  struggle: { icon: 'alert-circle', color: 'warning' },
+  added: { icon: 'add-circle', color: 'primary' },
+  removed: { icon: 'remove-circle', color: 'danger' },
+  moved: { icon: 'arrow-forward-circle', color: 'primary' },
+  edited: { icon: 'create', color: 'textMuted' },
+  calendar: { icon: 'calendar', color: 'primary' },
+  warning: { icon: 'warning', color: 'warning' },
+};
 
 export interface CheckInResultProps {
   result: DailyCheckinResponse;
@@ -10,6 +26,10 @@ export interface CheckInResultProps {
 
 export function CheckInResult({ result, onDone }: CheckInResultProps) {
   const styles = useStyles();
+  const { colors } = useTheme();
+  // What could not be done as asked reads apart from what was done.
+  const done = result.changes.filter((change) => change.kind !== 'warning');
+  const warnings = result.changes.filter((change) => change.kind === 'warning');
   // Four numbers is one too many for a row of cards, so the third slot goes to
   // whatever actually happened: a day being emptied is the loudest of the three,
   // then a removal, and the review count when the report was an ordinary one.
@@ -43,6 +63,39 @@ export function CheckInResult({ result, onDone }: CheckInResultProps) {
         ))}
       </View>
 
+      {result.answers.map((answer) => (
+        <Card key={answer.question} style={styles.summary}>
+          <AppText variant="label">{answer.question}</AppText>
+          {answer.lines.map((line, index) => (
+            <AppText key={`${index}-${line}`} variant="caption" tone={index === 0 ? 'default' : 'muted'}>
+              {line}
+            </AppText>
+          ))}
+        </Card>
+      ))}
+
+      {/*
+        Counts cannot show a misread; the list can. If "Carnot'ta takıldım"
+        landed on the Gauss set, this is where the student sees it — and
+        Geçmiş → Değerlendirmeler is where they undo it.
+      */}
+      {done.length > 0 ? (
+        <Card style={styles.summary}>
+          <AppText variant="label">Ne anladım</AppText>
+          {done.map((change, index) => (
+            <View key={`${index}-${change.text}`} style={styles.change}>
+              <Ionicons name={KIND_ICON[change.kind].icon} size={16} color={colors[KIND_ICON[change.kind].color]} />
+              <AppText variant="caption" style={styles.changeText}>
+                {change.text}
+              </AppText>
+            </View>
+          ))}
+          <AppText variant="caption" tone="muted">
+            Yanlış anladıysam Geçmiş → Değerlendirmeler’den geri alabilirsin.
+          </AppText>
+        </Card>
+      ) : null}
+
       {result.scheduledReviews.length > 0 ? (
         <Card style={styles.summary}>
           <AppText variant="label">Tekrar takvimine yazıldı</AppText>
@@ -60,6 +113,19 @@ export function CheckInResult({ result, onDone }: CheckInResultProps) {
           <AppText variant="caption" tone="muted">
             O gün geldiğinde tekrar görevi Görevler ekranına kendiliğinden düşer.
           </AppText>
+        </Card>
+      ) : null}
+
+      {warnings.length > 0 ? (
+        <Card style={styles.summary}>
+          <AppText variant="label" tone="warning">
+            İstediğin gibi yapamadıklarım
+          </AppText>
+          {warnings.map((change, index) => (
+            <AppText key={`${index}-${change.text}`} variant="caption" tone="muted">
+              • {change.text}
+            </AppText>
+          ))}
         </Card>
       ) : null}
 
@@ -105,6 +171,8 @@ const useStyles = makeStyles(({ spacing }) => ({
   summary: { gap: spacing.xs },
   reviewRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   reviewTitle: { flex: 1 },
+  change: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
+  changeText: { flex: 1 },
   stats: { flexDirection: 'row', gap: spacing.sm },
   stat: { flex: 1, alignItems: 'center', gap: spacing.xxs, paddingHorizontal: spacing.sm },
 }));

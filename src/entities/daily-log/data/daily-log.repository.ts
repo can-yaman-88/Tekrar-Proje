@@ -1,4 +1,4 @@
-import type { DailyCheckinResponse } from '@contracts/daily-checkin.contract';
+import { DailyCheckinResponseSchema, type DailyCheckinResponse } from '@contracts/daily-checkin.contract';
 import { BaseRepository } from '@shared/api/repository';
 import type { NewDailyLog } from '../domain/daily-log';
 
@@ -38,13 +38,18 @@ export class DailyLogRepository extends BaseRepository {
       'daily_logs.outcome',
       this.db
         .from('daily_logs')
-        .select('id, status, summary, error_message, log_date')
+        .select('id, status, summary, error_message, log_date, result')
         .eq('id', dailyLogId)
         .maybeSingle(),
     );
     if (!log) return { state: 'missing' };
     if (log.status === 'pending' || log.status === 'processing') return { state: 'processing' };
     if (log.status === 'failed') return { state: 'failed', message: log.error_message };
+
+    // The server keeps the response it sent; when it is there, it is the answer
+    // in full — the list, the answers, and the reminders still to schedule.
+    const kept = DailyCheckinResponseSchema.safeParse(log.result);
+    if (kept.success) return { state: 'succeeded', result: kept.data };
 
     const [updates, created, removed, mistakes, reviews] = await Promise.all([
       this.execute(
@@ -80,6 +85,12 @@ export class DailyLogRepository extends BaseRepository {
       result: {
         dailyLogId,
         summary: log.summary ?? 'Değerlendirmen işlendi.',
+        // A check-in from before the response was kept: the counts below are
+        // what can be rebuilt from the rows it wrote.
+        changes: [],
+        answers: [],
+        reminders: [],
+        undoneLogId: null,
         coveredDates: [log.log_date],
         attachmentNotes: [],
         updatedTaskIds: updates.map((row) => row.task_id),

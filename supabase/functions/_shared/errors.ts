@@ -38,14 +38,22 @@ export class LlmError extends Error {
      * key, an empty balance. It is written for them, in their language, and is
      * the only internal detail allowed out; `message` stays in the logs.
      */
-    options?: { cause?: unknown; hint?: string },
+    options?: { cause?: unknown; hint?: string; affordableTokens?: number },
   ) {
     super(message, options);
     this.name = 'LlmError';
     this.hint = options?.hint;
+    this.affordableTokens = options?.affordableTokens;
   }
 
   readonly hint: string | undefined;
+  /**
+   * On a 402, how many output tokens the balance still covers, when the
+   * gateway says so. OpenRouter prices a request at its WORST case — the whole
+   * output limit — so a request that would have cost cents is refused outright;
+   * asked again with this limit, it goes through.
+   */
+  readonly affordableTokens: number | undefined;
 
   toHttpError(): HttpError {
     if (this.kind === 'unavailable') {

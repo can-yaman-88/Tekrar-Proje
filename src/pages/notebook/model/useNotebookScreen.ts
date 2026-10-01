@@ -1,4 +1,5 @@
 import type { IsoDate } from '@contracts/enums.contract';
+import { bySyllabusOrder } from '@domain/syllabus-order';
 import {
   accuracyLabel,
   latestReviewByTopic,
@@ -53,6 +54,9 @@ export interface MistakeGroup {
   topicId: string;
   courseLabel: string;
   topicTitle: string;
+  /** Where the topic sits in the syllabus: groups follow the course's own order. */
+  topicWeek: number | null;
+  topicPosition: number;
   /** "2 açık · 1 çözüldü · son 28 Eyl" */
   summary: string;
   entries: MistakeEntryModel[];
@@ -198,6 +202,8 @@ export function useNotebookScreen() {
           topicId: entry.topicId,
           courseLabel: entry.courseLabel,
           topicTitle: entry.topicTitle,
+          topicWeek: entry.topicWeek,
+          topicPosition: entry.topicPosition,
           summary: '',
           entries: [],
         },
@@ -212,9 +218,18 @@ export function useNotebookScreen() {
       byTopic.set(entry.topicId, current);
     }
 
-    // Most recent trouble first: that is where the student is right now.
+    // Course by course, and within a course the syllabus's order — the week a
+    // topic is taught in and its place in that week — never the topics' names.
+    // When the student last got stuck stays on each group's summary line.
     return [...byTopic.values()]
-      .sort((a, b) => b.latest.localeCompare(a.latest))
+      .sort(
+        (a, b) =>
+          a.group.courseLabel.localeCompare(b.group.courseLabel, 'tr') ||
+          bySyllabusOrder(
+            { weekNumber: a.group.topicWeek, position: a.group.topicPosition },
+            { weekNumber: b.group.topicWeek, position: b.group.topicPosition },
+          ),
+      )
       .map(({ group, latest, open, resolved }) => ({
         ...group,
         // Open entries first inside a topic, each half newest first.

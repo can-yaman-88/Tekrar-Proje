@@ -1,4 +1,4 @@
-import { TASK_GROUP_LABEL, isDeadlineWork, isOpen, isOverdue, nextStatusOnToggle, priorityScore, progressRatio, taskGroupOf, withStatus } from '../task.rules';
+import { TASK_GROUP_LABEL, cardGroupsOf, isDeadlineWork, isOpen, isOverdue, nextStatusOnToggle, priorityScore, progressRatio, taskGroupOf, withStatus } from '../task.rules';
 import type { Task } from '../task.types';
 
 const TODAY = '2026-09-23';
@@ -19,6 +19,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   status: 'pending',
   confidenceLevel: null,
   source: 'manual',
+  isPriority: false,
   completedAt: null,
   topic: { id: 'top', title: 'Kafes' },
   course: { id: 'c', name: 'Statik', code: 'ME 201', colorHex: null },
@@ -63,6 +64,27 @@ describe('görev kuralları', () => {
 
     const lowConfidence = priorityScore(task({ confidenceLevel: 1 }), TODAY, null);
     expect(lowConfidence).toBeGreaterThan(today);
+  });
+});
+
+describe('kartın etiketleri', () => {
+  it('öğrenme kartı hem Concepts hem Feynman süzgecinde görünür', () => {
+    const card = task({ type: 'learning', source: 'ai_weekly_plan' });
+    const steps = [task({ type: 'concept_note', source: 'ai_weekly_plan' }), task({ type: 'feynman', source: 'ai_weekly_plan' })];
+    expect([...cardGroupsOf(card, steps)].sort()).toEqual(['concepts', 'feynman']);
+  });
+
+  it('ödev olarak etiketlenen grup, içindeki sınavı Sınav süzgecinden saklamaz', () => {
+    const card = task({ type: 'concept_note', source: 'homework' });
+    expect(cardGroupsOf(card, [task({ type: 'quiz', source: 'ai_weekly_plan' })]).has('quiz')).toBe(true);
+  });
+});
+
+describe('aciliyet', () => {
+  it('acil işaretli görev, iki haftalık gecikmeden ve yakın sınavdan bile önce gelir', () => {
+    const urgent = priorityScore(task({ isPriority: true }), TODAY, null);
+    const lateAndPressed = priorityScore(task({ dueDate: '2026-09-09', confidenceLevel: 1 }), TODAY, 1);
+    expect(urgent).toBeGreaterThan(lateAndPressed);
   });
 });
 

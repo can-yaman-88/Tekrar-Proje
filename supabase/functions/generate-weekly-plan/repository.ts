@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { IsoDate } from '../_shared/contracts/enums.contract.ts';
+import type { IsoDate, TaskType } from '../_shared/contracts/enums.contract.ts';
 import type { Json } from '../_shared/database.types.ts';
 import { HttpError } from '../_shared/errors.ts';
 import { addDays } from '../_shared/domain/dates.ts';
@@ -55,6 +55,89 @@ const minutesBetween = (start: string, end: string): number => {
   return Math.max(0, toMinutes(end) - toMinutes(start));
 };
 
+/**
+ * One row of the plan, in the column names `apply_weekly_plan` expects.
+ * A type alias rather than an interface: only aliases satisfy `Json`.
+ */
+export type PlanTaskRow = {
+  id: string;
+  parent_task_id: string | null;
+  topic_id: string;
+  type: TaskType;
+  title: string;
+  instructions: string;
+  target_count: number | null;
+  estimated_minutes: number | null;
+  due_date: IsoDate;
+};
+
+/**
+ * Turns placed steps into task rows, gathering the concept page and the
+ * Feynman page of one topic under a single learning task.
+ *
+ * The container carries no minutes and no question count on purpose: the week
+ * view lists containers and steps side by side, so a container with an
+ * estimate would have every grouped day count its work twice — and the same
+ * number would later be fed back into the learned capacity.
+ *
+ * Its day is the last of its steps': the sitting is finished when its second
+ * half is, and a container that claimed to be due earlier would only nag.
+ */
+export function buildPlanRows(
+  rows: readonly { slot: PlanSlot; title: string; instructions: string }[],
+): PlanTaskRow[] {
+  const groups = new Map<string, { slot: PlanSlot; title: string; instructions: string }[]>();
+  for (const row of rows) {
+    const key = row.slot.learningGroupKey;
+    if (key === null) continue;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  const parentIdByKey = new Map<string, string>();
+  const out: PlanTaskRow[] = [];
+
+  // Containers first: a step cannot reference a row that is not there yet, and
+  // the array's order is the only thing SQL's two passes have to go on.
+  for (const [key, members] of groups) {
+    if (members.length < 2) continue; // a group of one is just a task
+    const first = members[0];
+    if (!first) continue;
+    const id = crypto.randomUUID();
+    parentIdByKey.set(key, id);
+    out.push({
+      id,
+      parent_task_id: null,
+      topic_id: first.slot.topicId,
+      type: 'learning',
+      title: `${first.slot.topicTitle} — öğrenme görevi`.slice(0, 200),
+      instructions:
+        'Konsept sayfası ve Feynman anlatımı aynı oturum: önce sayfaya ekle, sonra kapat ve boş kâğıda anlat.',
+      target_count: null,
+      estimated_minutes: null,
+      due_date: members.reduce<IsoDate>(
+        (latest, member) => (member.slot.dueDate > latest ? member.slot.dueDate : latest),
+        first.slot.dueDate,
+      ),
+    });
+  }
+
+  for (const { slot, title, instructions } of rows) {
+    out.push({
+      id: crypto.randomUUID(),
+      parent_task_id: slot.learningGroupKey === null ? null : (parentIdByKey.get(slot.learningGroupKey) ?? null),
+      topic_id: slot.topicId,
+      type: slot.type,
+      title: title.slice(0, 200),
+      instructions: instructions.slice(0, 2000),
+      target_count: slot.targetCount,
+      estimated_minutes: slot.estimatedMinutes,
+      due_date: slot.dueDate,
+    });
+  }
+
+  return out;
+}
+
 export class WeeklyPlanRepository {
   constructor(
     private readonly service: TypedClient,
@@ -79,7 +162,7 @@ export class WeeklyPlanRepository {
         this.service
           .from('topics')
           .select(
-            'id, title, course_id, week_number, ease_factor, repetitions, next_review_on, last_reviewed_at, has_advanced_material, course:courses!topics_course_fk(name, code)',
+            'id, title, course_id, week_number, position, ease_factor, repetitions, next_review_on, last_reviewed_at, has_advanced_material, course:courses!topics_course_fk(name, code)',
           )
           .eq('user_id', this.userId)
           .limit(MAX_TOPICS),
@@ -126,21 +209,34 @@ export class WeeklyPlanRepository {
     if (notesError) throw dbError('load task notes', notesError);
     const notedTaskIds = new Set(noted.map((n) => n.task_id));
 
+    // Steps by container, so a group is judged as one thing — exactly as
+    // apply_weekly_plan now deletes it.
+    const childrenByParent = new Map<string, typeof tasksResult.data>();
+    for (const task of tasksResult.data) {
+      if (task.parent_task_id === null) continue;
+      childrenByParent.set(task.parent_task_id, [...(childrenByParent.get(task.parent_task_id) ?? []), task]);
+    }
+
     const failures = new Map<string, number>();
     const completedSteps = new Map<string, Set<StudyStep>>();
     const openSteps = new Map<string, Set<StudyStep>>();
     const teacherMaterial = new Set<string>();
     const recentFrom = addDays(weekStart, -RECENT_FAILURE_DAYS);
 
+    const isCleanRow = (task: (typeof tasksResult.data)[number]): boolean =>
+      task.due_date >= weekStart &&
+      task.due_date <= weekEnd &&
+      task.source === 'ai_weekly_plan' &&
+      task.status === 'pending' &&
+      task.completed_count === 0 &&
+      !notedTaskIds.has(task.id);
+
     for (const task of tasksResult.data) {
-      const inWindow = task.due_date >= weekStart && task.due_date <= weekEnd;
       // Mirrors apply_weekly_plan's delete predicate: these rows are replaceable.
+      // A container counts as replaceable only when every step under it is —
+      // one worked step keeps the whole group, so the group is still real work.
       const replaceable =
-        inWindow &&
-        task.source === 'ai_weekly_plan' &&
-        task.status === 'pending' &&
-        task.completed_count === 0 &&
-        !notedTaskIds.has(task.id);
+        isCleanRow(task) && (childrenByParent.get(task.id) ?? []).every((child) => isCleanRow(child));
 
       // A task that is about to be replaced must not look like existing work.
       if (replaceable) continue;
@@ -249,6 +345,7 @@ export class WeeklyPlanRepository {
         courseId: t.course_id,
         courseLabel: t.course.code ?? t.course.name,
         weekNumber: t.week_number,
+        position: t.position,
         easeFactor: Number(t.ease_factor),
         repetitions: t.repetitions,
         nextReviewOn: t.next_review_on,
@@ -298,15 +395,7 @@ export class WeeklyPlanRepository {
     weekEnd: IsoDate,
     rows: { slot: PlanSlot; title: string; instructions: string }[],
   ): Promise<{ deleted: number; inserted: number }> {
-    const payload = rows.map(({ slot, title, instructions }) => ({
-      topic_id: slot.topicId,
-      type: slot.type,
-      title: title.slice(0, 200),
-      instructions: instructions.slice(0, 2000),
-      target_count: slot.targetCount,
-      estimated_minutes: slot.estimatedMinutes,
-      due_date: slot.dueDate,
-    }));
+    const payload = buildPlanRows(rows);
 
     const { data, error } = await this.service.rpc('apply_weekly_plan', {
       p_user_id: this.userId,

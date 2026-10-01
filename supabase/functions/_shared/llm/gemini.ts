@@ -51,7 +51,7 @@ export class GeminiProvider implements LlmProvider {
         generationConfig: {
           responseMimeType: 'application/json',
           responseJsonSchema: toStrictJsonSchema(request.schema),
-          maxOutputTokens: this.maxOutputTokens,
+          maxOutputTokens: Math.min(request.maxOutputTokens ?? this.maxOutputTokens, this.maxOutputTokens),
         },
       },
       { attempts: 3, timeoutMs: this.timeoutMs },
@@ -68,6 +68,6 @@ export class GeminiProvider implements LlmProvider {
     const text = candidate?.content?.parts.map((p) => p.text ?? '').join('') ?? '';
     if (!text) throw new LlmError('invalid_output', `Model returned no content (${candidate?.finishReason ?? 'unknown'}).`);
 
-    return { data: parseStructured(text, request.schema), model: parsed.data.modelVersion ?? this.model };
+    return { data: parseStructured(text, request.schema, request.salvage), model: parsed.data.modelVersion ?? this.model };
   }
 }

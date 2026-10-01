@@ -22,6 +22,17 @@ function hintForStatus(status: number): string | undefined {
   }
 }
 
+/**
+ * "…You requested up to 8192 tokens, but can only afford 3104." — OpenRouter's
+ * 402 says exactly how far the balance reaches. Null when it says nothing
+ * usable, and the refusal stands.
+ */
+export function affordableTokensFrom(detail: string): number | null {
+  const match = /can only afford (\d+)/i.exec(detail);
+  const tokens = match ? Number(match[1]) : Number.NaN;
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : null;
+}
+
 interface RetryOptions {
   attempts: number;
   timeoutMs: number;
@@ -65,6 +76,7 @@ export async function postJsonWithRetry(
         // 4xx other than rate limits means our request is wrong — surface it, don't retry.
         throw new LlmError('invalid_output', `Provider rejected request (${lastError})`, {
           hint: hintForStatus(res.status),
+          affordableTokens: res.status === 402 ? (affordableTokensFrom(detail) ?? undefined) : undefined,
         });
       }
     } catch (error) {

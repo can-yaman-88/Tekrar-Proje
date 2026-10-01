@@ -181,7 +181,10 @@ Deno.test('ders saati yalnızca tahmini bütçeden düşülür', () => {
   assertEquals(planningBudget({ minutes: 60, source: 'learned' }, 360), 60);
   assertEquals(planningBudget({ minutes: 90, source: 'override' }, 360), 90);
   assertEquals(planningBudget({ minutes: 120, source: 'default' }, 120), 60);
-  assertEquals(planningBudget({ minutes: 120, source: 'general' }, 360), 30);
+  // Yoğun ders günü de bir konsept + Feynman oturumu kadar yer tutar…
+  assertEquals(planningBudget({ minutes: 120, source: 'general' }, 360), 60);
+  // …ama günün kendi bütçesini aşmaz.
+  assertEquals(planningBudget({ minutes: 45, source: 'general' }, 360), 45);
   assertEquals(planningBudget({ minutes: 0, source: 'blocked' }, 0), 0);
 });
 

@@ -183,8 +183,13 @@ export const useAddMistake = () =>
     // sibling entry, or let the refetch bring it in.
     const sibling = (list as TopicMistakeWithContext[]).find((other) => other.topicId === topicId);
     if (!sibling) return list;
-    return [
-      { ...entry, topicTitle: sibling.topicTitle, courseLabel: sibling.courseLabel, taskTitle: null },
-      ...(list as TopicMistakeWithContext[]),
-    ];
+    const filed: TopicMistakeWithContext = {
+      ...entry,
+      topicTitle: sibling.topicTitle,
+      topicWeek: sibling.topicWeek,
+      topicPosition: sibling.topicPosition,
+      courseLabel: sibling.courseLabel,
+      taskTitle: null,
+    };
+    return [filed, ...(list as TopicMistakeWithContext[])];
   });

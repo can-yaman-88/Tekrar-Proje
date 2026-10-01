@@ -19,6 +19,7 @@ const task = (id: string, over: Partial<Task> = {}): Task => ({
   status: 'pending',
   confidenceLevel: null,
   source: 'manual',
+  isPriority: false,
   completedAt: null,
   topic: { id: `top-${id}`, title: 'Konu' },
   course: { id: 'c1', name: 'Statik', code: 'ME 201', colorHex: null },

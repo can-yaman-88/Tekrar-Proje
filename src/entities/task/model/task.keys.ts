@@ -19,4 +19,5 @@ export const taskMutationKeys = {
   update: [...taskKeys.all, 'update'] as const,
   setStatus: [...taskKeys.all, 'set-status'] as const,
   remove: [...taskKeys.all, 'delete'] as const,
+  setPriority: [...taskKeys.all, 'set-priority'] as const,
 };

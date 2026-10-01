@@ -14,6 +14,9 @@ const RECENT_FAILURE_DAYS = 30;
 export interface ExamModeTopic {
   id: string;
   title: string;
+  /** Syllabus place: equal-risk topics are planned in this order, never by name. */
+  weekNumber: number | null;
+  position: number;
   easeFactor: number;
   intervalDays: number;
   repetitions: number;
@@ -66,7 +69,7 @@ export class ExamModeRepository extends BaseRepository {
             'exam_mode.topics',
             this.db
               .from('topics')
-              .select('id, title, ease_factor, interval_days, repetitions, next_review_on')
+              .select('id, title, week_number, position, ease_factor, interval_days, repetitions, next_review_on')
               .in('id', topicIds),
           );
 
@@ -119,6 +122,8 @@ export class ExamModeRepository extends BaseRepository {
       topics: topicRows.map((row) => ({
         id: row.id,
         title: row.title,
+        weekNumber: row.week_number,
+        position: row.position,
         easeFactor: Number(row.ease_factor),
         intervalDays: row.interval_days,
         repetitions: row.repetitions,

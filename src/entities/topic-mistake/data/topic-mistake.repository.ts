@@ -24,8 +24,11 @@ const toMistake = (row: {
   resolvedAt: row.resolved_at,
 });
 
-/** Enough of the topic, course and task to file and explain each entry on the notebook screen. */
-const MISTAKE_WITH_CONTEXT = `${MISTAKE_SELECT}, topic:topics!topic_mistakes_topic_fk(title, course:courses!topics_course_fk(name, code)), task:tasks!topic_mistakes_task_fk(title)`;
+/**
+ * Enough of the topic, course and task to file and explain each entry on the
+ * notebook screen; the topic's week and place keep each course in syllabus order.
+ */
+const MISTAKE_WITH_CONTEXT = `${MISTAKE_SELECT}, topic:topics!topic_mistakes_topic_fk(title, week_number, position, course:courses!topics_course_fk(name, code)), task:tasks!topic_mistakes_task_fk(title)`;
 
 export class TopicMistakeRepository extends BaseRepository {
   /** The whole book, newest first, grouped later by course and topic. */
@@ -43,6 +46,8 @@ export class TopicMistakeRepository extends BaseRepository {
     return rows.map((row) => ({
       ...toMistake(row),
       topicTitle: row.topic.title,
+      topicWeek: row.topic.week_number,
+      topicPosition: row.topic.position,
       courseLabel: row.topic.course.code ?? row.topic.course.name,
       taskTitle: row.task?.title ?? null,
     }));

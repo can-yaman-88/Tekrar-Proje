@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(92);
+select plan(109);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -445,6 +445,10 @@ insert into public.daily_log_exam_changes (user_id, daily_log_id, exam_id, actio
 values ('aaaaaaaa-0000-4000-8000-000000000001', 'f0000000-0000-4000-8000-00000000000e',
         'e0000000-0000-4000-8000-00000000000a', 'update', '{"title": "A vizesi"}'::jsonb);
 
+insert into public.daily_log_extras (user_id, daily_log_id, kind, target_id, previous)
+values ('aaaaaaaa-0000-4000-8000-000000000001', 'f0000000-0000-4000-8000-00000000000e',
+        'exam_result', 'e0000000-0000-4000-8000-00000000000a', '{"outcome": null}'::jsonb);
+
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
 select is(
@@ -462,6 +466,43 @@ select throws_ok(
   null,
   'a signed-in client cannot run the check-in edit RPC'
 );
+select throws_ok(
+  $$select public.apply_checkin_reopen_weekdays(
+      'bbbbbbbb-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-00000000000e', '[7]'::jsonb)$$,
+  '42501',
+  null,
+  'a signed-in client cannot reopen weekdays through the check-in RPC'
+);
+select throws_ok(
+  $$select public.apply_checkin_extras(
+      'bbbbbbbb-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-00000000000e')$$,
+  '42501',
+  null,
+  'a signed-in client cannot write off-plan work, exam results or urgency through the check-in RPC'
+);
+select throws_ok(
+  $$select public.apply_checkin_ungroup('bbbbbbbb-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-00000000000e')$$,
+  '42501',
+  null,
+  'a signed-in client cannot take groups apart through the check-in RPC'
+);
+select throws_ok(
+  $$select public.apply_checkin_exam_scopes('bbbbbbbb-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-00000000000e')$$,
+  '42501',
+  null,
+  'a signed-in client cannot set exam topics through the check-in RPC'
+);
+select throws_ok(
+  $$select public.ungroup_task('e0000000-0000-4000-8000-00000000000a')$$,
+  'P0002',
+  null,
+  'B cannot take A''s group apart by hand'
+);
+select is(
+  (select count(*)::int from public.daily_log_extras),
+  0,
+  'B cannot see what A''s check-in recorded as extras'
+);
 
 set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
 select is(
@@ -469,10 +510,127 @@ select is(
   1,
   'A sees their own exam history'
 );
+select is(
+  (select count(*)::int from public.daily_log_extras),
+  1,
+  'A sees their own check-in extras'
+);
 reset role;
 
 -- ---------------------------------------------------------------------------
--- 12. The review cycle: ticking work off moves the schedule, the history is
+-- 13. Learning tasks: the weekly plan replaces groups whole, or not at all.
+-- ---------------------------------------------------------------------------
+set local role service_role;
+
+-- A plan with one learning task and its two steps.
+select public.apply_weekly_plan(
+  'aaaaaaaa-0000-4000-8000-000000000001',
+  current_date,
+  current_date + 6,
+  json_build_array(
+    json_build_object('id', '11110000-0000-4000-8000-00000000000a', 'parent_task_id', null,
+      'topic_id', 'd0000000-0000-4000-8000-00000000000a', 'type', 'learning',
+      'title', 'Öğrenme görevi', 'instructions', '-', 'target_count', null,
+      'estimated_minutes', null, 'due_date', current_date + 1),
+    json_build_object('id', '11110000-0000-4000-8000-00000000000b',
+      'parent_task_id', '11110000-0000-4000-8000-00000000000a',
+      'topic_id', 'd0000000-0000-4000-8000-00000000000a', 'type', 'concept_note',
+      'title', 'Konsept', 'instructions', '-', 'target_count', null,
+      'estimated_minutes', 30, 'due_date', current_date + 1),
+    json_build_object('id', '11110000-0000-4000-8000-00000000000c',
+      'parent_task_id', '11110000-0000-4000-8000-00000000000a',
+      'topic_id', 'd0000000-0000-4000-8000-00000000000a', 'type', 'feynman',
+      'title', 'Feynman', 'instructions', '-', 'target_count', null,
+      'estimated_minutes', 25, 'due_date', current_date + 1)
+  )::jsonb
+);
+
+select is(
+  (select count(*)::int from public.tasks
+    where parent_task_id = '11110000-0000-4000-8000-00000000000a'),
+  2,
+  'the weekly plan can write a learning task with two steps'
+);
+select is(
+  (select estimated_minutes from public.tasks where id = '11110000-0000-4000-8000-00000000000a'),
+  null,
+  'the container carries no minutes of its own'
+);
+
+-- A note on one step: the whole group is work now, and must survive re-planning.
+insert into public.task_notes (user_id, task_id, body)
+values ('aaaaaaaa-0000-4000-8000-000000000001', '11110000-0000-4000-8000-00000000000b', 'hocanın tablosu');
+
+select is(
+  (public.apply_weekly_plan('aaaaaaaa-0000-4000-8000-000000000001', current_date, current_date + 6,
+     '[]'::jsonb) ->> 'deleted')::int,
+  0,
+  'a step carrying a note keeps its whole group through a re-plan'
+);
+select is(
+  (select count(*)::int from public.tasks
+    where id in ('11110000-0000-4000-8000-00000000000a', '11110000-0000-4000-8000-00000000000b',
+                 '11110000-0000-4000-8000-00000000000c')),
+  3,
+  'and the cascade destroys nothing'
+);
+
+-- With the note gone the group is untouched work again, and goes as one.
+delete from public.task_notes where task_id = '11110000-0000-4000-8000-00000000000b';
+select is(
+  (public.apply_weekly_plan('aaaaaaaa-0000-4000-8000-000000000001', current_date, current_date + 6,
+     '[]'::jsonb) ->> 'deleted')::int,
+  3,
+  'an untouched group is replaced whole'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 14. Gathering existing tasks into a learning task.
+-- ---------------------------------------------------------------------------
+insert into public.tasks (id, user_id, topic_id, type, title, due_date) values
+  ('22220000-0000-4000-8000-00000000000a', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-00000000000a', 'concept_note', 'A konsept', current_date),
+  ('22220000-0000-4000-8000-00000000000b', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-00000000000a', 'feynman', 'A Feynman', current_date);
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+
+-- Called on its own: a volatile function inside a WHERE clause would run once
+-- per scanned row, and the second run would find the pair already grouped.
+select public.group_learning_pair(
+  array['22220000-0000-4000-8000-00000000000a', '22220000-0000-4000-8000-00000000000b']::uuid[],
+  'Kafes — öğrenme görevi', current_date
+);
+
+select is(
+  (select count(*)::int from public.tasks
+    where id in ('22220000-0000-4000-8000-00000000000a', '22220000-0000-4000-8000-00000000000b')
+      and parent_task_id is not null),
+  2,
+  'two loose tasks become the steps of one learning task'
+);
+select is(
+  (select t.type::text from public.tasks t
+    where t.id = (select parent_task_id from public.tasks
+                   where id = '22220000-0000-4000-8000-00000000000a')),
+  'learning',
+  'the task they were gathered under is a learning task'
+);
+
+-- B''s task is not A''s to gather, and the refusal is explicit rather than silent.
+select throws_ok(
+  $$select public.group_learning_pair(
+      array['e0000000-0000-4000-8000-00000000000b']::uuid[], 'Olmaz', current_date)$$,
+  '23514',
+  null,
+  'grouping refuses a single task, and never sees another user''s'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 15. The review cycle: ticking work off moves the schedule, the history is
 --     the student's alone and read-only, and nothing is counted twice.
 -- ---------------------------------------------------------------------------
 insert into public.topics (id, user_id, course_id, title) values
@@ -611,7 +769,7 @@ select is(
 reset role;
 
 -- ---------------------------------------------------------------------------
--- 13. One door for status, limits, error reports and push tokens.
+-- 16. One door for status, limits, error reports and push tokens.
 -- ---------------------------------------------------------------------------
 insert into public.tasks (id, user_id, topic_id, type, title, due_date, status) values
   ('e0000000-0000-4000-8000-0000000000f1', 'aaaaaaaa-0000-4000-8000-000000000001',
@@ -728,7 +886,7 @@ select is(
 reset role;
 
 -- ---------------------------------------------------------------------------
--- 14. The offline queue: a mistake-book entry keeps the id the phone gave it,
+-- 17. The offline queue: a mistake-book entry keeps the id the phone gave it,
 --     and sending it twice cannot make two.
 -- ---------------------------------------------------------------------------
 set local role authenticated;
@@ -746,6 +904,32 @@ select throws_ok(
   '23505',
   null,
   'replaying the same entry is a unique violation (the app reads it as already saved), never a duplicate'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 18. "Grubu dağıt" still works behind the status door: a container with
+--     work on it is set aside (skipped), by the student's own hand.
+-- ---------------------------------------------------------------------------
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+insert into public.tasks (id, user_id, topic_id, type, title, due_date) values
+  ('f1000000-0000-4000-8000-0000000000a1', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-00000000000a', 'learning', 'Öğrenme', current_date);
+insert into public.tasks (id, user_id, topic_id, type, title, due_date, parent_task_id) values
+  ('f1000000-0000-4000-8000-0000000000a2', 'aaaaaaaa-0000-4000-8000-000000000001',
+   'd0000000-0000-4000-8000-00000000000a', 'concept_note', 'Konsept', current_date,
+   'f1000000-0000-4000-8000-0000000000a1');
+update public.tasks set completed_count = 1 where id = 'f1000000-0000-4000-8000-0000000000a1';
+select is(
+  public.ungroup_task('f1000000-0000-4000-8000-0000000000a1') ->> 'container',
+  'set_aside',
+  'ungrouping a container with work on it sets it aside instead of failing at the status door'
+);
+select is(
+  (select status::text from public.tasks where id = 'f1000000-0000-4000-8000-0000000000a1'),
+  'skipped',
+  'the set-aside container is skipped'
 );
 reset role;
 

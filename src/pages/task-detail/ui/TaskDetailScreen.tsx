@@ -1,6 +1,7 @@
 import { NoteItem } from '@entities/task-note';
 import { MistakeList } from '@entities/topic-mistake';
 import { NoteComposer } from '@features/task-note-add';
+import { PriorityToggle, useTaskPriority } from '@features/task-priority';
 import { TaskTimerCard } from '@features/task-timer';
 import { formatShortDate, localDateOf } from '@shared/lib/date';
 import { AppText, Card, ErrorState, Screen, Skeleton, makeStyles } from '@shared/ui';
@@ -14,6 +15,7 @@ import { TaskSubtaskSection } from './TaskSubtaskSection';
 export function TaskDetailScreen() {
   const { taskId } = useLocalSearchParams<{ taskId: string }>();
   const detail = useTaskDetail(taskId);
+  const priority = useTaskPriority(detail.task);
   const styles = useStyles();
 
   if (detail.error) {
@@ -71,6 +73,10 @@ export function TaskDetailScreen() {
               </Pressable>
             ) : null}
           </View>
+
+          {detail.task.status === 'pending' || detail.task.status === 'in_progress' ? (
+            <PriorityToggle priority={priority} />
+          ) : null}
 
           <MistakeList
             mistakes={detail.mistakes}

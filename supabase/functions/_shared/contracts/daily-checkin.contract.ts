@@ -8,9 +8,48 @@ export const DailyCheckinRequestSchema = z.object({
 });
 export type DailyCheckinRequest = z.infer<typeof DailyCheckinRequestSchema>;
 
+/** What kind of change one line of the "ne anladım" list describes; the app picks an icon from it. */
+export const CheckinChangeKindSchema = z.enum([
+  'done',
+  'progress',
+  'struggle',
+  'added',
+  'removed',
+  'moved',
+  'edited',
+  'calendar',
+  'warning',
+]);
+export type CheckinChangeKind = z.infer<typeof CheckinChangeKindSchema>;
+
+export const CheckinChangeSchema = z.object({ kind: CheckinChangeKindSchema, text: z.string() });
+export type CheckinChange = z.infer<typeof CheckinChangeSchema>;
+
+/** A question from the report ("yarın ne var?"), answered from the plan as it stands after it. */
+export const CheckinAnswerSchema = z.object({ question: z.string(), lines: z.array(z.string()) });
+export type CheckinAnswer = z.infer<typeof CheckinAnswerSchema>;
+
+/** "Yarın 9'da hatırlat": a local date and clock time, as the student meant them. */
+export const CheckinReminderSchema = z.object({
+  date: z.iso.date(),
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  text: z.string(),
+});
+export type CheckinReminder = z.infer<typeof CheckinReminderSchema>;
+
 export const DailyCheckinResponseSchema = z.object({
   dailyLogId: z.uuid(),
   summary: z.string(),
+  /**
+   * Every change the report was read as, one line each. Counts alone cannot
+   * show a misread; "Carnot seti → tamamlandı" can.
+   */
+  changes: z.array(CheckinChangeSchema).default([]),
+  answers: z.array(CheckinAnswerSchema).default([]),
+  /** Notifications the phone schedules; the server cannot. */
+  reminders: z.array(CheckinReminderSchema).default([]),
+  /** An earlier check-in this report undid: its reminders must go too. */
+  undoneLogId: z.uuid().nullable().default(null),
   /** Days the report covered, oldest first — a catch-in may cover several. */
   coveredDates: z.array(z.string()).default([]),
   /** Warnings about attachments that could not be read. */
@@ -130,6 +169,31 @@ export const CheckinExtractionSchema = z.object({
           ),
       }),
     ),
+  bulkOutcomes: z
+    .array(
+      z.object({
+        daysAgo: z
+          .number()
+          .int()
+          .nullable()
+          .describe("Whose tasks: 0 = REPORT DATE's, 1 = the day before's… null = REPORT DATE's."),
+        outcome: z
+          .enum(['completed', 'not_attempted'])
+          .describe('completed = "hepsini bitirdim"; not_attempted = "hiç çalışamadım", "hiçbirine bakamadım".'),
+        courseIds: z
+          .array(z.string())
+          .describe('Only these courses (ids from COURSES) when the statement names some: "fizikteki her şeyi bitirdim". Empty = every course.'),
+        exceptTaskIds: z
+          .array(z.string())
+          .describe('Tasks the statement leaves out: "Gauss hariç hepsini bitirdim". Empty when nothing is left out.'),
+      }),
+    )
+    .describe(
+      'A statement about ALL of one day\'s tasks at once: "bugünkü her şeyi bitirdim", "bugün hiç çalışamadım", ' +
+        '"dünkü görevlerin hepsini yaptım", "Gauss hariç hepsini bitirdim". The app works out which tasks that ' +
+        'means, so do not also list them in taskOutcomes. A task the report names on its own ("hepsini bitirdim ' +
+        'ama Carnot\'ta 3 yanlışım vardı") still gets its own taskOutcomes entry, and that entry wins.',
+    ),
   topicStruggles: z
     .array(
       z.object({
@@ -197,15 +261,25 @@ export const CheckinExtractionSchema = z.object({
           .enum(['problem_set', 'concept_review', 'derivation', 'spaced_review', 'mock_exam'])
           .describe('problem_set for homework and question sets; the others only when clearly stated.'),
         problemCount: z.number().int().nullable().describe('Number of questions if stated, else null.'),
+        isHomework: z
+          .boolean()
+          .describe(
+            'true for work they were GIVEN — ödev, proje, rapor, teslim. false for work they plan for ' +
+              'themselves: "yarın 20 türev sorusu çözeceğim", "bir de kinematik tekrarı ekle".',
+          ),
         dueInDays: z
           .number()
           .int()
           .nullable()
           .describe(
-            'Deadline counted from REPORT DATE: 0 = the report day itself, 1 = the next day, 2 = two days later. ' +
-              'Work it out from what they wrote ("yarın gece 12ye kadar" = 1, "pazartesi" = days until that ' +
-              'weekday). null when no deadline is given.',
+            'Homework: the deadline. Their own work: the day they will do it. Counted from REPORT DATE ' +
+              '(0 = the report day, 1 = the next day) — look the day up in CALENDAR ("yarın gece 12ye kadar" = 1). ' +
+              'null when no day is given, or when dueDate is used instead.',
           ),
+        dueDate: z
+          .string()
+          .nullable()
+          .describe('YYYY-MM-DD, only when they name a calendar date beyond CALENDAR ("15 Kasım\'a kadar"); else null.'),
         instructions: z.string().nullable().describe('One Turkish sentence on how to attack it, else null.'),
         subtasks: z
           .array(z.string())
@@ -238,6 +312,14 @@ export const CheckinExtractionSchema = z.object({
             'The day to empty, counted from REPORT DATE: 0 = the report day, 1 = the next day. ' +
               'For a weekday name ("pazar"), the number of days from REPORT DATE to that day.',
           ),
+        untilDaysAhead: z
+          .number()
+          .int()
+          .nullable()
+          .describe(
+            'The last day when they name a stretch, counted the same way: "cumadan pazartesiye kadar yokum" = ' +
+              'the Monday, "3 gün hastayım" = daysAhead + 2. null for a single day.',
+          ),
         spreadFromDaysAhead: z
           .number()
           .int()
@@ -257,9 +339,92 @@ export const CheckinExtractionSchema = z.object({
     )
     .describe(
       'Days the student says they cannot study on, and asks to be emptied: "pazar gününü boşalt", ' +
-        '"yarın hiçbir şey yapamam, görevleri dağıt". The work on that day is moved to other days ' +
-        'by the app — never delete it, and never list the individual tasks here. ' +
+        '"yarın hiçbir şey yapamam, görevleri dağıt", "hafta sonu yokum". The work on those days is moved ' +
+        'to other days by the app — never delete it, and never list the individual tasks here. ' +
         'Empty when no day is being closed.',
+    ),
+  reopenedWeekdays: z
+    .array(
+      z.object({
+        daysAhead: z
+          .number()
+          .int()
+          .describe('Any coming day of that weekday, from CALENDAR; the app reads the weekday off it.'),
+      }),
+    )
+    .describe(
+      'A weekday they had closed for good and can work on again: "pazarları artık çalışabiliyorum", ' +
+        '"cumartesi işi bıraktım". Only a standing change — a single free day is not this.',
+    ),
+  dayLoads: z
+    .array(
+      z.object({
+        daysAhead: z.number().int().describe('The day, counted from REPORT DATE (0 = the report day).'),
+        untilDaysAhead: z
+          .number()
+          .int()
+          .nullable()
+          .describe('Last day of a stretch ("önümüzdeki 3 gün" = 2); null for one day.'),
+        minutes: z
+          .number()
+          .int()
+          .nullable()
+          .describe(
+            'The time they say they have ("sadece 1 saatim var" = 60, "4 saatim var" = 240). null when they ' +
+              'only say it should be lighter ("çok yoğunum", "hafif olsun") — the app decides how much lighter.',
+          ),
+      }),
+    )
+    .describe(
+      'How much TIME a day can take: "yarın sadece 1 saatim var", "önümüzdeki 3 gün yoğunum, planı ' +
+        'hafiflet", "cumartesi 4 saatim var". Work that no longer fits is moved by the app. No time at all ' +
+        'is dayClearances; a number of TASKS is dayTargets.',
+    ),
+  courseHolds: z
+    .array(
+      z.object({
+        mode: z
+          .enum(['pause', 'only'])
+          .describe(
+            'pause = the listed courses wait ("kimyayı bu hafta dondur"); only = everything EXCEPT the ' +
+              'listed courses waits ("yarın sadece fiziğe çalışacağım").',
+          ),
+        courseIds: z
+          .array(z.string())
+          .describe('Exact ids from COURSES. "Sadece vizeye çalışacağım" names the course of that exam.'),
+        fromDaysAhead: z.number().int().describe('First day of the stretch, counted from REPORT DATE.'),
+        untilDaysAhead: z
+          .number()
+          .int()
+          .nullable()
+          .describe('Last day ("bu hafta" = the coming Pazar, "vizeye kadar" = the day before it); null for one day.'),
+      }),
+    )
+    .describe(
+      'Whole courses set aside for some days: "bu hafta kimyayı dondur", "vize bitene kadar statiği ' +
+        'ertele", "yarın sadece fiziğe çalışacağım", "bu hafta sadece vizelere odaklanacağım". The app moves ' +
+        'that work past the stretch; deadlines inside it stay. One task is taskReschedules; a day is dayClearances.',
+    ),
+  dayTargets: z
+    .array(
+      z.object({
+        daysAhead: z
+          .number()
+          .int()
+          .describe(
+            'The day, counted from REPORT DATE: 0 = the report day, 1 = the next day. ' +
+              'For a weekday name ("pazartesi"), the number of days from REPORT DATE to that day.',
+          ),
+        maxMainTasks: z
+          .number()
+          .int()
+          .describe('How many main tasks that day should carry — the number they actually said ("2 ana görev" = 2).'),
+      }),
+    )
+    .describe(
+      'How much a named day should carry: "pazartesi gününe 2 ana görev istiyorum, bu günü ona göre ' +
+        'düzenle", "yarın en fazla 3 iş olsun". One entry per day, and only when they state a NUMBER — ' +
+        'never infer one from "az olsun" or "hafif geçsin". Emptying a day is dayClearances, not this.',
     ),
   taskReschedules: z
     .array(
@@ -381,8 +546,72 @@ export const CheckinExtractionSchema = z.object({
     )
     .describe(
       'Only when the student asks for existing tasks to be gathered into one piece of work: ' +
-        '"şu üçünü tek ödev olarak grupla", "bunlar aynı işin parçası". Never group work on your ' +
-        'own initiative, however alike the tasks look.',
+        '"şu üçünü tek ödev olarak grupla", "bunlar aynı işin parçası", "konsept ve feynmanı grupla". A ' +
+        'concept page and a Feynman page are never each other\'s parent: list both as children. Never group ' +
+        'work on your own initiative, however alike the tasks look.',
+    ),
+  taskUngroups: z
+    .array(z.object({ taskId: z.string().describe('Handle of the group card, or of any task inside it.') }))
+    .describe(
+      'Groups to take apart: "grupları dağıt", "şu grubu ayır", "separate the grouped tasks". "Hepsini" means ' +
+        'every task marked "group of" in TASKS. The steps stay as tasks of their own; the empty card goes.',
+    ),
+  daySwaps: z
+    .array(
+      z.object({
+        firstDaysAhead: z.number().int().describe('One day, from CALENDAR.'),
+        secondDaysAhead: z.number().int().describe('The other day, from CALENDAR.'),
+      }),
+    )
+    .describe(
+      'Two days whose whole work trades places: "salı ile perşembenin görevlerini değiştir", "bugünküyle ' +
+        'yarınkini takas et". Moving only some tasks is taskReschedules.',
+    ),
+  syllabusOrders: z
+    .array(
+      z.object({
+        fromDaysAhead: z.number().int().describe('First day of the stretch, from CALENDAR.'),
+        untilDaysAhead: z.number().int().nullable().describe('Last day; null = a week from the first.'),
+        courseIds: z.array(z.string()).describe('Only these courses (COURSES handles); empty = every course.'),
+      }),
+    )
+    .describe(
+      'Put the work of a stretch in syllabus order — earliest topic week first — keeping how many tasks each ' +
+        'day has: "görevleri izlencedeki konu sırasına göre diz, günlerdeki görev sayısı aynı kalsın".',
+    ),
+  weekTidies: z
+    .array(
+      z.object({
+        fromDaysAhead: z.number().int().describe('First day of the stretch, from CALENDAR.'),
+        untilDaysAhead: z.number().int().nullable().describe('Last day; null = a week from the first.'),
+      }),
+    )
+    .describe(
+      "Tidy a stretch by the study loop's rules — a topic's concept and Feynman pages onto one day as one " +
+        'learning card, no quiz before its Feynman day, no day over its time: "haftayı düzenle", "aynı ' +
+        'konunun konsept ve feynmanını aynı güne koy", "görev dağılımını toparla".',
+    ),
+  backlogActions: z
+    .array(z.object({ action: z.enum(['spread', 'close']).describe('spread = to the coming days; close = drop them.') }))
+    .describe(
+      'Every overdue open task at once: "geciken işleri önümüzdeki günlere dağıt" = spread, "geciken işleri ' +
+        'kapat" = close. One named late task is taskReschedules or taskRemovals.',
+    ),
+  examScopes: z
+    .array(
+      z.object({
+        examId: z.string().describe('Exact handle from EXAMS.'),
+        fromWeek: z.number().int().nullable().describe('First topic week it covers ("1-5. haftalar" = 1); else null.'),
+        untilWeek: z.number().int().nullable().describe('Last topic week it covers ("1-5. haftalar" = 5); else null.'),
+        topicIds: z.array(z.string()).describe('Topics named one by one (TOPICS handles); else empty.'),
+        replace: z
+          .boolean()
+          .describe('true when this is the whole list ("vize ilk beş haftayı kapsıyor"); false when adding ("Carnot da dahil").'),
+      }),
+    )
+    .describe(
+      'Which topics an exam covers: "vize 1 ilk beş haftayı kapsıyor", "finalde Carnot da var". Weeks are the ' +
+        "week numbers TOPICS shows for that exam's course.",
     ),
   taskNotes: z
     .array(
@@ -427,8 +656,15 @@ export const CheckinExtractionSchema = z.object({
           .int()
           .nullable()
           .describe(
-            'Exam day counted from REPORT DATE (0 = today, 7 = a week away; for a weekday name count ' +
-              'the days until it). Required for insert; null on delete or when only the title changed.',
+            'Exam day counted from REPORT DATE, looked up in CALENDAR (0 = today, 7 = a week away). ' +
+              'null on delete, when only the title changed, or when exactDate is used instead.',
+          ),
+        exactDate: z
+          .string()
+          .nullable()
+          .describe(
+            'YYYY-MM-DD when they name a calendar date ("5 Aralık", "12.11") — never count the days to it ' +
+              'yourself. An insert needs this or dateInDays. null otherwise.',
           ),
       }),
     )
@@ -448,5 +684,158 @@ export const CheckinExtractionSchema = z.object({
         'çözüyorum", "geçen takıldığım bağıl hız meselesi oturdu". Only for entries listed in ' +
         'OPEN MISTAKES, and only when they say it is behind them.',
     ),
+  extraWork: z
+    .array(
+      z.object({
+        topicId: z.string().describe('Exact handle from TOPICS the work was on.'),
+        problemsSolved: z.number().int().nullable().describe('Questions solved, when stated; else null.'),
+        correctCount: z.number().int().nullable().describe('How many of them were right, when stated; else null.'),
+        minutes: z.number().int().nullable().describe('Time spent, when stated ("bir saat" = 60); else null.'),
+        daysAgo: z.number().int().nullable().describe('0 = REPORT DATE, 1 = the day before… null = REPORT DATE.'),
+      }),
+    )
+    .describe(
+      'Study done OUTSIDE the plan, that no task in TASKS covers: "plan dışı 15 türev sorusu çözdüm, 12 ' +
+        'doğru", "fazladan bir saat kinematik tekrar yaptım". Work on a listed task is taskOutcomes, never this.',
+    ),
+  examResults: z
+    .array(
+      z.object({
+        examId: z.string().describe('Exact handle from EXAMS.'),
+        outcome: z
+          .number()
+          .int()
+          .nullable()
+          .describe(
+            'Their verdict, 1–5: "kötü geçti" 1, "beklediğimden kötü" 2, "idare eder" 3, "iyi geçti" 4, ' +
+              '"çok iyi" 5. null when they only give a score.',
+          ),
+        score: z.number().nullable().describe('The score they got, as stated ("65 aldım" = 65); else null.'),
+        maxScore: z.number().nullable().describe('What it was out of ("40 üzerinden 30" = 40); null means 100.'),
+        hardTopicIds: z
+          .array(z.string())
+          .describe('Handles from TOPICS they say went badly in it ("özellikle Gauss\'ta zorlandım"). Else empty.'),
+      }),
+    )
+    .describe(
+      'How an exam that has already happened went: "vizeden 65 aldım", "fizik vizesi kötü geçti, Gauss\'ta ' +
+        'zorlandım". A new date is examChanges, not this.',
+    ),
+  priorities: z
+    .array(
+      z.object({
+        taskId: z.string().describe('Exact handle from TASKS.'),
+        urgent: z.boolean().describe('true for "acil", "önce bunu bitirmem lazım"; false for "artık acil değil".'),
+      }),
+    )
+    .describe(
+      'A task the student marks as urgent — or no longer urgent. Moving it to a day is taskReschedules, and ' +
+        'only when they name a day.',
+    ),
+  examPlans: z
+    .array(z.object({ examId: z.string().describe('Exact handle from EXAMS.') }))
+    .describe(
+      'They ask for a plan for an exam: "vize için plan çıkar", "sınava kadar ne çalışayım, planla". The app ' +
+        'builds it the way the exam screen does.',
+    ),
+  reminders: z
+    .array(
+      z.object({
+        daysAhead: z.number().int().describe('The day, from CALENDAR (0 = the report day).'),
+        time: z
+          .string()
+          .nullable()
+          .describe(
+            'HH:MM, 24-hour ("9\'da" = 09:00, "akşam 8" = 20:00). With only a part of the day: sabah 09:00, ' +
+              'öğlen 12:00, akşam 19:00, gece 22:00. null when no time is given.',
+          ),
+        text: z.string().describe('What to remind, short Turkish, in their words: "Fizik ödevini teslim et".'),
+      }),
+    )
+    .describe('Reminders they ask for: "yarın 9\'da fizik ödevini hatırlat", "cuma akşamı quiz\'i hatırlat".'),
+  undoPreviousReport: z
+    .boolean()
+    .describe(
+      'true ONLY when they ask to take back an earlier report as a whole: "az önceki değerlendirmeyi geri al", ' +
+        '"dünkü raporu iptal et, yanlış anlaşılmış". Undoing one task is never this.',
+    ),
+  infoRequests: z
+    .array(
+      z.object({
+        kind: z
+          .enum(['day_agenda', 'week_load', 'deadlines', 'exams', 'weak_spots', 'overdue'])
+          .describe(
+            'day_agenda = "yarın ne var?", "bugün ne kaldı?"; week_load = "bu hafta ne kadar işim var?"; ' +
+              'deadlines = "hangi ödevlerin teslimi yakın?"; exams = "vizeye kaç gün kaldı?"; ' +
+              'weak_spots = "nerelerde zayıfım?"; overdue = "geride kalan işim var mı?".',
+          ),
+        daysAhead: z
+          .number()
+          .int()
+          .nullable()
+          .describe('day_agenda only: the day asked about, from CALENDAR (0 = the report day). null otherwise.'),
+      }),
+    )
+    .describe(
+      'Questions the student asks. Never answer them yourself: the app answers from the plan as it stands ' +
+        'after this report. Empty when they ask nothing.',
+    ),
 });
 export type CheckinExtraction = z.infer<typeof CheckinExtractionSchema>;
+
+// ---------------------------------------------------------------------------
+// Two readers, two schemas.
+//
+// Every sentence a student can say became a field, and the one schema that
+// held them all grew to where the guard's margin was nearly gone — and to
+// where cheaper models, handed thirty lists at once, got worse at every one of
+// them. So the report is read twice, at the same time: once for what HAPPENED
+// (outcomes, struggles, time, results) and once for what should CHANGE (new
+// work, days, courses, exams, reminders, questions). Each reader gets half the
+// schema and only its own rules; the answers are merged into one extraction,
+// and everything downstream is unchanged.
+// ---------------------------------------------------------------------------
+const field = CheckinExtractionSchema.shape;
+
+/** What happened: the first reader. */
+export const CheckinProgressSchema = z.object({
+  summary: field.summary,
+  taskOutcomes: field.taskOutcomes,
+  bulkOutcomes: field.bulkOutcomes,
+  topicStruggles: field.topicStruggles,
+  unmatchedMentions: field.unmatchedMentions,
+  advancedMaterialTopics: field.advancedMaterialTopics,
+  timeLogs: field.timeLogs,
+  mistakeResolutions: field.mistakeResolutions,
+  extraWork: field.extraWork,
+  examResults: field.examResults,
+});
+
+/** What should change: the second reader. */
+export const CheckinPlanSchema = z.object({
+  taskRemovals: field.taskRemovals,
+  plannedWork: field.plannedWork,
+  attachmentTasks: field.attachmentTasks,
+  taskBreakdowns: field.taskBreakdowns,
+  dayClearances: field.dayClearances,
+  reopenedWeekdays: field.reopenedWeekdays,
+  dayLoads: field.dayLoads,
+  courseHolds: field.courseHolds,
+  dayTargets: field.dayTargets,
+  taskReschedules: field.taskReschedules,
+  taskEdits: field.taskEdits,
+  taskGroups: field.taskGroups,
+  taskUngroups: field.taskUngroups,
+  daySwaps: field.daySwaps,
+  syllabusOrders: field.syllabusOrders,
+  weekTidies: field.weekTidies,
+  backlogActions: field.backlogActions,
+  examScopes: field.examScopes,
+  taskNotes: field.taskNotes,
+  priorities: field.priorities,
+  examChanges: field.examChanges,
+  examPlans: field.examPlans,
+  reminders: field.reminders,
+  undoPreviousReport: field.undoPreviousReport,
+  infoRequests: field.infoRequests,
+});

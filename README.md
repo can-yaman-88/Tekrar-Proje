@@ -52,7 +52,7 @@ npx tsc --noEmit        # tip kontrolü
 npx expo lint           # katman sınırları dahil
 npx jest                # alan (domain) ve altyapı testleri (ayar: jest.config.js)
 npx expo-doctor         # bağımlılık uyumu
-npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 92 test)
+npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 109 test)
 ```
 
 Edge Function testleri (Deno kurulu değilse Docker ile):
@@ -167,13 +167,30 @@ Hesap bütün planlayıcılarda (uygulama, haftalık plan, değerlendirme) aynı
   sayılmaz; alt adımlı ödevin kapsayıcısı ayrıca sayılmaz; tahmini olmayan iş 30 dk sayılır.
 - Günler senin saat diliminle hesaplanır (uygulama telefonun saat dilimini profile yazar);
   "pazartesi şunu bitirdim" diye geriye dönük bildirdiğin iş o güne tarihlenir.
-- Yeterince görülmemiş gün uydurma 120 dakikayı değil, **genel temponu** alır.
-- Ders saati yalnızca tahmini bütçeden düşülür; öğrenilmiş bir gün zaten derslerinle birlikte
-  yaşadığın gerçek gündür.
+- Yeterince görülmemiş gün uydurma bir sayıyı değil, **genel temponu** alır; hiç geçmiş yoksa
+  gün **150 dakika** sayılır.
+- Ders saati yalnızca tahmini bütçeden (genel tempo ya da varsayılan) düşülür — saatin yarısı
+  kadar; öğrenilmiş bir gün zaten derslerinle birlikte yaşadığın gerçek gündür, kendi sayın da
+  senindir.
+- Ders ne kadar yoğun olursa olsun tahmini gün **en az 60 dakika** — bir konsept + Feynman
+  oturumu — tutar (eskiden 30'du ve dört dersli bir hafta içi günü hiçbir oturumu alamıyordu);
+  ama bu taban günün kendi bütçesini aşmaz, kapattığın gün kapalı kalır.
 
 Ayarlar'daki **Günlük çalışma kapasiten** kartı her günün sayısını ve nereden geldiğini gösterir
 (öğrenildi / senin sayın / genel tempon / varsayılan / kapalı). Bir güne dokunup **Otomatik ·
 Elle · Kapalı** seçebilirsin: elle girdiğin dakika (15–600) bütün planlayıcılarda geçerlidir.
+
+**Hafta ortasında yenilenen plan bugünden başlar.** Plan geçmiş günlere iş koymaz: telefon kendi
+tarihini gönderir, plan o günden itibaren kurulur. Geçmiş günlerde dokunmadığın plan görevleri
+kaldırılır ve konuları bugünden itibaren yeniden planlanır — kaçırdığın iş kaybolmaz, öne gelir.
+Pazartesi sabahki otomatik plan için "bugün" zaten pazartesidir.
+
+**Konular izlence sırasıyla ele alınır.** Eşit öncelikteki konulardan hangisinin önce
+planlanacağına, hangisinin sınav planında önce geleceğine ve "konu sırasına göre diz" dendiğinde
+nasıl dizileceğine konunun izlencedeki yeri karar verir: işlendiği hafta, sonra o haftadaki sırası.
+Konu adının alfabetik sırası hiçbir yerde kullanılmaz. (Eskiden eşitlik alfabeyle bozuluyordu:
+6. haftanın "Capacitance" konusu, 2. haftanın "Electric charge"ından önce planlanıyordu.)
+Defter sekmesi de konuları her dersin içinde izlence sırasıyla gösterir.
 
 **Ara verdiğin günler tek raporla kapanır.** Birkaç gün değerlendirme yazmadıysan Görevler
 ekranında bir şerit çıkar. Tek metinde birden çok günü anlatabilirsin ("pazartesi kafesleri
@@ -407,11 +424,75 @@ Günlük değerlendirme yalnızca "şunu yaptım" demek için değil; planı dü
   sayılır ne de silinir.
 - **Metinden ödev**: "4 dersten 4 ödev var, İngilizce yarın gece 12'ye kadar, diğerleri pazartesi"
   cümlesi dört göreve ve iki ayrı teslim tarihine dönüşür. Tarihi model değil kod hesaplar: model
-  yalnızca "rapor gününden kaç gün sonra" der, gün adlarını çözebilmesi için isteme rapor gününün
-  haftanın hangi günü olduğu da yazılır.
+  yalnızca "rapor gününden kaç gün sonra" der, onu da saymaz — istemdeki takvim tablosundan bakar
+  (aşağıda). "15 Kasım'a kadar" gibi tablonun dışındaki bir tarihi olduğu gibi yazar, kod doğrular.
 
 Değerlendirme ekranındaki görev listesi bu yüzden iki hafta ileriyi kapsar: "bu haftaki görevleri
-sil" diyebilmen için o görevlerin modele gösterilmiş olması gerekir.
+sil" diyebilmen için o görevlerin modele gösterilmiş olması gerekir. Liste yüz görevle sınırlıdır ve
+sınır dolduğunda **seçilir, kesilmez**: önce raporda adı geçen görevler, sonra rapor gününe yakın
+açık işler, sonra yakın zamanda bitenler (düzeltme onlara gelir), en son pencerenin geri kalanı.
+Eskiden en eski seksen görev alınıyordu; dolu bir haftada bu, iki haftalık bitmiş işin gelecek
+haftanın görevlerini listeden itmesi demekti.
+
+## Meşgul günün cümleleri
+
+Yoğun bir öğrenci uzun rapor yazmaz; tek cümleyle bütün bir günü, bir dersi ya da haftanın şeklini
+değiştirmek ister. Bunların hepsinde model yalnızca **hangi gün, hangi ders, ne kadar** olduğunu
+söyler; hangi görevin nereye gittiğini kod, senin kapasitene ve çalışma döngüsüne göre hesaplar.
+
+| Cümle | Ne olur |
+|---|---|
+| "Bugünkü her şeyi bitirdim" / "dünkü görevlerin hepsini yaptım" | O günün açık görevleri tamamlanır. Model görevleri tek tek saymaz; kod listeden okur. Öğrenme kartı adımlarından kapanır. |
+| "Gauss hariç hepsini bitirdim" / "fizikteki her şeyi bitirdim" | Aynısı, istisna ya da dersle daraltılmış. Ayrıca anılan görev ("ama Carnot'ta 3 yanlışım vardı") kendi sonucunu alır. |
+| "Bugün hiç çalışamadım" | O günün işleri **kopyalanmaz, taşınır**: sonraki günlere, kapasiteye ve teslim tarihlerine göre. |
+| "Yarın sadece 1 saatim var" | Yarın 60 dakikayı tutar; sığmayan iş taşınır. Önce döngünün sonu gider (sınav, sayfadan önce), o gün teslimi olan ödev hiç gitmez. |
+| "Önümüzdeki 3 gün yoğunum, hafiflet" | Sayı söylenmediği için model uydurmaz: her gün, o haftagününün öğrenilmiş kapasitesinin yarısını alır. |
+| "Cumadan pazartesiye kadar yokum" / "3 gün hastayım" | Aralığın her günü boşaltılır, işler dağıtılır. |
+| "Pazarları artık çalışabiliyorum" | Kalıcı olarak kapattığın gün yeniden açılır (profilde); geri alma eski hâline döndürür. |
+| "Bu hafta kimyayı dondur" / "vize bitene kadar statiği ertele" | O dersin aralıktaki işi aralığın hemen sonrasına gider. Teslimi aralığın içinde olan ödev yerinde kalır ve bu söylenir. |
+| "Yarın sadece fiziğe çalışacağım" / "bu hafta yalnızca vizelere odaklanacağım" | Tersi: diğer derslerin işi o günlerden çıkar. |
+| "Yarın 20 türev sorusu çözeceğim" | Kendi planladığın iş: görev olur ama **ödev sayılmaz** (etiketi ödev değil, teslim koruması yok). |
+| "Vize 5 Aralık'a ertelendi" | Takvim tarihi olduğu gibi yazılır; model altmış küsur günü kendisi saymaz. |
+| "Yarın ne var?", "bu hafta ne kadar işim var?", "hangi ödevlerin teslimi yakın?", "vizeye kaç gün var?", "nerelerde zayıfım?", "geride kalan işim var mı?" | Cevabı model değil uygulama yazar — ve bu raporun yaptığı değişikliklerden **sonraki** plana bakarak: "pazarı boşalt, yarın ne var?" taşınmış işleri de sayar. |
+| "Plan dışı 15 türev sorusu çözdüm, 12 doğru" | O gün **bitmiş** bir görev olur ("Ek çalışma: Türev — 15 soru"): kapasite ölçümüne ve haftalık özete girer, isabeti konunun tekrar takvimine yazılır, düşükse hata defterine not düşer. Süre söylendiyse ölçülmüş oturum olarak kaydedilir. |
+| "Vizeden 65 aldım, Gauss'ta zorlandım" / "40 üzerinden 30" / "fizik vizesi kötü geçti" | Sınav ekranındaki "Sınav nasıl geçti?"nin aynısı: sınavın kapsadığı konular sınavın notuyla tekrar takvimine yazılır, zor diye anılan konu başarısız sayılır, kalan sprint görevleri kalkar. Puan söylendiyse his değil **puan** esas alınır; yüzdeyi model değil kod hesaplar. Henüz yapılmamış sınava sonuç yazılmaz. |
+| "Fizik vizesi için plan çıkar" | Sınav ekranının **aynı** sprint planı (kod paylaşılır: `_shared/domain/cram-plan.ts`) görev olur; dokunulmamış eski sprint görevleri yerini bırakır. Yalnızca son 7 günde; daha erkense nedeni söylenir. |
+| "Fizik ödevi acil" / "artık acil değil" | Görev acil işaretlenir: görev listesinde gecikmiş işlerin bile üstüne çıkar, üzerinde "Acil" yazar, günü süre sınırı ya da ders bekletme yüzünden boşaltılırken yerinde kalır. Görev ekranındaki **Acil olarak işaretle** düğmesi aynı işi elle yapar. |
+| "Yarın 9'da fizik ödevini hatırlat" / "cuma akşamı quizi hatırlat" | Telefonda o gün ve saatte bildirim kurulur ("akşam" 19.00, saat yoksa 09.00). Değerlendirme geri alınırsa hatırlatması da iptal olur. |
+| "Konsept ve Feynman'ı grupla" | Bir konunun konsept ve Feynman sayfası **öğrenme kartı** olur — haftalık planın yaptığıyla aynı kart — ve tek güne gelir: aynı oturum. Biri diğerinin "üst görevi" yapılmaz (öyle olunca konsept sayfası tek başına işaretlenemiyordu). Grup kartı, adımlarının raporun sonundaki gününde durur: "grupla ve bugüne al" dendiğinde kart dünde, adımları bugünde kalmaz. |
+| "Grupları dağıt" / "şu grubu ayır" | Adımlar ayrı görev olur, boş kalan kart gider (üzerinde iş yapılmadıysa silinir, yapıldıysa kenara alınır). Aynı raporda yeniden gruplanabilir. Görev ekranındaki **Grubu dağıt** düğmesi aynısını elle yapar. |
+| "Salı ile perşembenin görevlerini değiştir" | İki günün kartları yer değiştirir; teslimi geçecek ödev yerinde kalır ve söylenir. |
+| "Görevleri izlencedeki konu sırasına diz, günlerdeki görev sayısı aynı kalsın" | Aralıktaki kartlar konu haftasına göre sıralanıp aynı gün yuvalarına yeniden dağıtılır: her gün yine aynı sayıda kart taşır. Teslimli ve acil işler yerinde kalır. |
+| "Haftayı düzenle" / "aynı konunun konsept ve Feynman'ını aynı güne koy" | Hafta düzenleyicinin kuralları bütün aralığa uygulanır: konsept ile Feynman aynı güne ve tek karta, sınav Feynman'la aynı güne ya da sonrasına, dolu gün boşaltılır. |
+| "Geciken işleri dağıt" / "geciken işleri kapat" | Gecikmiş bütün açık kartlar önümüzdeki haftaya kapasiteye göre dağıtılır ya da kapatılır. |
+| "Vize 1 ilk beş haftayı kapsıyor" / "finalde Carnot da var" | Sınavın konuları ayarlanır; aynı rapordaki sonuç ya da sınav planı yeni listeyi okur. |
+| "Tüm görevleri İngilizce yap" | Her göreve tek tek yeni ad (bir raporda 80 göreve kadar). |
+| "Az önceki değerlendirmeyi geri al" | Bu rapordan hemen önceki değerlendirme (son iki gün içinde) Geçmiş ekranındaki geri almayla aynı şekilde geri alınır; raporun geri kalanı eski hâline dönmüş plana uygulanır. Yalnızca o bir rapor: tekrar denense bile daha eskisine uzanmaz. |
+
+Bütün taşımalar **kart kart** yapılır: bir öğrenme görevi ile iki adımı aynı güne gider. (Gün
+boşaltma eskiden satırları tek tek yerleştirdiği için bir kartın adımlarını ayrı günlere
+bölebiliyordu.) Her taşıma sonunda yine döngü onarımından geçer: sınav Feynman gününün önüne
+düşmez.
+
+Değerlendirme ekranında sık yazılan dört cümle tek dokunuşla eklenir, **Neler yazabilirim?**
+bölümü de bütün bu cümleleri örnekleriyle gösterir.
+
+**Gece yarısından sonra yazılan rapor biten güne sayılır.** Saat 04.00'e kadar yazdığın rapor
+dünün raporudur: "bugün 20 soru çözdüm" dünkü güne, "yarın vize var" sabah başlayacak güne gider.
+Ekran bunu açıkça yazar.
+
+### Sonuç ekranı: "Ne anladım"
+
+Sonuç ekranı artık yalnızca "3 görev güncellendi" demez; raporun nasıl okunduğunu satır satır
+yazar: *"Kafes seti" tamamlandı · 8 doğru*, *"Carnot seti": takıldın; telafi görevi yarın için
+eklendi*, *"Gauss seti" → Perşembe 8 Eki*, *Kimya beklemede: bugün – Pazar 4 Eki*. Bir yanlış
+okuma ancak gösterilirse yakalanır; yakalandığında Geçmiş → Değerlendirmeler'den geri alınır.
+Satırları model değil kod yazar, yani listede yazan şey veritabanına söylenenin ta kendisidir.
+Yapılamayanlar ("teslimi bu aralıkta olduğu için yerinde kaldı", "o gün için söylediğin süre
+teslimi olan işe yetmiyor") ayrı bir kutuda durur. Sorduğun sorunun cevabı da burada çıkar.
+
+Yanıtın tamamı değerlendirme kaydına da yazılır (`daily_logs.result`): bağlantı koptuğunda telefon
+yalnızca sayıları değil, bu listeyi, cevapları ve kurulacak hatırlatmaları da oradan okur.
 
 ## Değerlendirmeyi geri alma
 
@@ -437,7 +518,12 @@ değerlendirmeden geldikleri bilgisi düşer) ve ekleri depolamadan silinir.
 
 Ayarlar sekmesinde **Yapay zekâ modeli** kartı var. Sunucu, sağlayıcının kataloğundan
 yalnızca yapılandırılmış çıktı (strict JSON) destekleyen modelleri listeler; ücretsiz olanlar
-başa gelir. Seçtiğin model profiline yazılır ve üç akışta da (değerlendirme, izlence, haftalık
+başa gelir. Liste **kesilmez**: bu desteği olan bütün modeller gelir (bugün 400'den fazla).
+Ekranda 40'ar model çizilir; **Daha fazla göster** ve **Tümünü göster** ile hepsine ulaşılır, arama
+da bütün listede çalışır. (Eskiden liste 120'de kesiliyordu; ücretsizler başta ve ada göre dizili
+olduğu için, adı alfabede geride kalan ücretli modellerin çoğu hiç seçilemiyordu.) Yapılandırılmış
+çıktı veremeyen modeller listede yoktur: uygulamanın her çağrısı katı JSON bekler, onlarla her
+değerlendirme hata verirdi. Seçtiğin model profiline yazılır ve üç akışta da (değerlendirme, izlence, haftalık
 plan) kullanılır. "Seçili modeli dene" düğmesi gerçek bir çağrı yapıp modelin çalışıp
 çalışmadığını söyler.
 
@@ -464,7 +550,7 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 92 pgTAP testi
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 109 pgTAP testi
   bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
   satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
 - **Görev durumu tek kapıdan değişir.** `guard_task_status` tetikleyicisi, uygulamanın
@@ -526,15 +612,19 @@ Uygulama, öğrencinin kendi çalışma sistemini bilir ve görevleri ona göre 
 |---|---|---|
 | 1 | **Concepts** | Konu işlendikten sonra: ünitenin konsept sayfasına bağlantılarıyla ekle |
 | 2 | **Feynman** | Aynı gün, hemen ardından: boş kâğıda sıfırdan anlatma |
-| 3 | **Sınav** | **Sonraki gün**: 10 soruluk otomasyon sınavı (hocanın materyali varsa önce o) |
+| 3 | **Sınav** | **Feynman'la aynı gün ya da sonrası**: 10 soruluk otomasyon sınavı (hocanın materyali varsa önce o) |
 | 4 | **Sınav · ileri seviye** | "Elimde zor sorular var" işaretliyse, aynı turda dördüncü görev olarak |
 
 Konsept ve Feynman **hep aynı güne** konur, çünkü öğrenci ikisini arka arkaya yapıyor. Sınav
-araya girmez, bir sonraki güne kalır — aradan zaman geçmesi onu gerçek bir hatırlama testi
-yapar. İkisi bir güne sığmazsa plan onları ayırır ve bunu not olarak söyler.
+Feynman'dan **önceye asla düşmez**: aynı gün ya da sonraki bir gün olur. Plan, yer varsa önce
+aynı günü dener. (Eskiden sınav her zaman ertesi güne itiliyordu.) Haftalık plan, hafta düzenleyici
+ve değerlendirmedeki taşımalar aynı kuralı kullanır. İkisi bir güne sığmazsa plan onları ayırır ve
+bunu not olarak söyler.
 
 Görevler bu üç etikete göre gruplanır; Görevler ve Hafta ekranlarındaki filtre
-çubuğundan etikete göre süzebilirsin.
+çubuğundan etikete göre süzebilirsin. Bir kart, **adımlarının etiketleriyle de** bulunur: öğrenme
+kartı hem Concepts hem Feynman süzgecinde görünür (eskiden Feynman süzgeci gruplu Feynman
+sayfalarının hiçbirini göstermiyordu).
 
 Adımlar sıra atlamaz: konu çalışılmadan problem seti gelmez. Aynı gün art arda da
 planlanabilir, günlere de yayılabilir — kapasiteye bağlı.
@@ -570,6 +660,29 @@ değiştirmedikçe aynı kalır. Planlayıcı bunu iki şekilde kullanır:
 Ortak kural: **model yalnızca sınıflandırır ve yazar; tarih, durum ve planlama kararlarını
 deterministik kod verir.** Model erişilemezse haftalık plan şablon metinlerle yine oluşur.
 
+### Değerlendirme modelinin gördüğü
+
+- **İki okuyucu, aynı anda.** Rapor iki modele paralel okunur: biri **ne oldu** (bitenler, takılmalar,
+  süre, plan dışı çalışma, sınav sonucu), öbürü **ne değişsin** (silme, taşıma, yeni iş, günler, dersler,
+  sınav takvimi, hatırlatma, sorular). Her biri şemanın yarısını ve yalnızca kendi kurallarını alır;
+  cevaplar birleştirilir, sonrası aynıdır. Tek şema her yeni cümleyle büyüyordu ve ucuz modeller otuz
+  listeyi birden doldururken hepsinde kötüleşiyordu; tek şema bugün 887 düğüm olurdu, iki okuyucu 306
+  ve 586. Paralel oldukları için süre uzamaz; istem iki kez gönderildiği için girdi maliyeti artar.
+
+- **Kısa tutamaçlar, UUID yok.** Görevler T1, T2…, konular K1…, dersler D1…, sınavlar S1…, hata
+  defteri H1… olarak listelenir. Model yüz satırlık listeden 36 karakterlik kimliği kopyalarken tek
+  harfi şaşırdığında o cümle sessizce düşüyordu; "T12" yarım kopyalanamaz ve on kat daha az yer
+  kaplar. Cevaptaki tutamaçlar planlayıcıya gitmeden gerçek kimliklere çevrilir
+  (`daily-checkin/aliases.ts`); tanınmayan her şey eskisi gibi reddedilir.
+- **Takvim tablosu.** İstemde rapor gününün on gün öncesinden on dört gün sonrasına her gün, o güne
+  karşılık gelen sayıyla yazılıdır (`daysAhead 3 = Cuma 2 Eki`). Model "cumaya" için saymaz, bakar.
+  Görev satırları da günlerini aynı sayılarla söyler, "dünkü set" doğrudan eşleşir.
+- **Kartın bütünlüğü.** Bir adım satırı hangi kartın adımı olduğunu söyler (`step of T1`), kart
+  satırları listede yan yana durur.
+- **Bozuk tek madde bütün raporu düşürmez.** Cevap şemadan bütün olarak geçemezse madde madde
+  doğrulanır: geçen her madde tutulur, geçmeyen atılır ve sayılır (`llm_output_salvaged` olayı).
+  Eskiden yirmi listeden birindeki tek yanlış değer, yarım sayfalık raporu hata ekranına çevirirdi.
+
 ### Giden ve gelen JSON'a konan sınırlar
 
 Model çağrıları iki yönde de doğrulanır (`supabase/functions/_shared/llm/guards.ts`):
@@ -581,7 +694,7 @@ Model çağrıları iki yönde de doğrulanır (`supabase/functions/_shared/llm/
 | Yanıt (gelen) | 200.000 karakteri aşan gövde okunmadan reddedilir; JSON nesne olmak zorundadır, derinlik ve düğüm sayısı sınırlıdır, sonra Zod şemasından geçer |
 | Reddedilen çıktı | İlk 400 karakteri `llm_output_rejected` olayıyla loglanır; telefona ham model çıktısı hiç inmez |
 
-Şema sınırları (derinlik 14, 800 düğüm) gerçek şemaların iki katından fazla paya sahiptir ve
+Şema sınırları (derinlik 14, 1200 düğüm) gerçek şemaların üstünde pay bırakır ve
 `_shared/llm/real-schemas.test.ts` bu payı ölçer. Sınırların gerçek şemalara teğet geçmesi bir
 kez tüm yapay zekâ çağrılarını sessizce durdurdu: koruma, koruduğu şeyle birlikte test edilir.
 

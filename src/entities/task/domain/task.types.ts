@@ -39,6 +39,8 @@ export interface Task {
   status: TaskStatus;
   confidenceLevel: number | null;
   source: TaskSource;
+  /** Marked urgent by the student, by hand or in a report: first on the board. */
+  isPriority: boolean;
   completedAt: string | null;
   topic: { id: string; title: string };
   course: CourseRef;

@@ -11,6 +11,7 @@ export {
   TASK_STATUS_LABEL,
   TASK_TYPE_BY_GROUP,
   TASK_TYPE_LABEL,
+  cardGroupsOf,
   editableGroupOf,
   isDeadlineWork,
   isHomework,

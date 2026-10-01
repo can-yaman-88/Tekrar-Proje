@@ -14,7 +14,10 @@ export function useWeeklyPlan() {
     // a paused mutation would look like a button that did nothing while the
     // plan was quietly being written.
     networkMode: 'always',
-    mutationFn: () => generateWeeklyPlan(weekStartOf(todayLocal())),
+    mutationFn: () => {
+      const today = todayLocal();
+      return generateWeeklyPlan(weekStartOf(today), today);
+    },
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: taskKeys.all });
       showToast(

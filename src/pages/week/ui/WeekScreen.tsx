@@ -69,9 +69,14 @@ export function WeekScreen() {
               <AppText variant="caption" tone="muted" style={styles.flex}>
                 {vm.header.progressLabel}
               </AppText>
+              <Pressable accessibilityRole="button" onPress={vm.onOpenShape} hitSlop={8}>
+                <AppText variant="caption" tone="primary">
+                  Haftayı düzenle ›
+                </AppText>
+              </Pressable>
               <Pressable accessibilityRole="button" onPress={vm.onOpenSummary} hitSlop={8}>
                 <AppText variant="caption" tone="primary">
-                  Haftalık özet ›
+                  Özet ›
                 </AppText>
               </Pressable>
             </View>
