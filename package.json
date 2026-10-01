@@ -61,27 +61,5 @@
     "apk": "bash scripts/build-apk.sh",
     "apk:local": "bash scripts/build-apk.sh --local"
   },
-  "private": true,
-  "jest": {
-    "preset": "jest-expo",
-    "testMatch": [
-      "**/__tests__/**/*.test.ts?(x)"
-    ],
-    "moduleNameMapper": {
-      "^@shared/(.*)$": "<rootDir>/src/shared/$1",
-      "^@entities/(.*)$": "<rootDir>/src/entities/$1",
-      "^@features/(.*)$": "<rootDir>/src/features/$1",
-      "^@widgets/(.*)$": "<rootDir>/src/widgets/$1",
-      "^@pages/(.*)$": "<rootDir>/src/pages/$1",
-      "^@core/(.*)$": "<rootDir>/src/core/$1",
-      "^@contracts/(.*)$": "<rootDir>/supabase/functions/_shared/contracts/$1",
-      "^@db$": "<rootDir>/supabase/functions/_shared/database.types.ts",
-      "^@domain/(.*)$": "<rootDir>/supabase/functions/_shared/domain/$1",
-      "^expo-modules-core$": "<rootDir>/node_modules/expo/node_modules/expo-modules-core",
-      "^expo-modules-core/(.*)$": "<rootDir>/node_modules/expo/node_modules/expo-modules-core/$1"
-    },
-    "setupFiles": [
-      "<rootDir>/jest.setup.ts"
-    ]
-  }
+  "private": true
 }

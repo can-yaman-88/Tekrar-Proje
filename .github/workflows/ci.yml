@@ -1,0 +1,84 @@
+# Every push and pull request runs the same checks a contributor runs locally
+# (see README → Kontroller). Three independent jobs, so a red one says where.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: Uygulama (tsc · lint · Jest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Tip kontrolü
+        run: npx tsc --noEmit
+      - name: Lint (katman sınırları dahil)
+        run: npx expo lint
+      - name: Jest
+        run: npx jest --ci
+
+  functions:
+    name: Edge Function'lar (Deno)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The shared contracts import zod as a bare specifier; Deno resolves it
+      # through the root package.json, so the packages have to be there.
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Alan ve LLM testleri
+        working-directory: supabase/functions/_shared
+        run: deno test --allow-all
+      - name: Fonksiyon testleri ve tip kontrolü
+        working-directory: supabase/functions
+        run: |
+          set -euo pipefail
+          for fn in daily-checkin generate-weekly-plan ingest-syllabus llm-models; do
+            echo "::group::$fn"
+            (cd "$fn" && deno check index.ts && if ls *.test.ts >/dev/null 2>&1; then deno test --allow-all; fi)
+            echo "::endgroup::"
+          done
+
+  database:
+    name: Veritabanı (migration · RLS testleri)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Yerel Supabase (bütün migration'lar)
+        run: supabase start
+      - name: pgTAP RLS testleri
+        run: supabase test db
+      - name: database.types.ts güncel mi
+        run: |
+          supabase gen types typescript --local > "$RUNNER_TEMP/database.types.ts"
+          if ! diff -u supabase/functions/_shared/database.types.ts "$RUNNER_TEMP/database.types.ts"; then
+            echo "::warning file=supabase/functions/_shared/database.types.ts::Üretilen tipler depodakinden farklı — npm run db:types çalıştırıp commit et."
+          fi
+      - if: always()
+        run: supabase stop --no-backup
