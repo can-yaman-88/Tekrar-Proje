@@ -36,6 +36,9 @@ function describe(error: unknown, context: ErrorContext): Report | null {
   // Only what the student cannot fix: no connection, a wrong form, an expired
   // session are expected, and the app already says so.
   if (appError.kind !== 'server' && appError.kind !== 'unknown') return null;
+  // An Edge Function's error envelope carries its request id: the function
+  // filed that one itself, with the server-side cause the app never sees.
+  if (appError.requestId !== undefined) return null;
   const original = error instanceof Error ? error : null;
   const cause = (appError.cause ?? {}) as { operation?: unknown; code?: unknown };
   return {

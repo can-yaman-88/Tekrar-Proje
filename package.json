@@ -55,7 +55,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "db:types": "supabase gen types typescript --local > supabase/functions/_shared/database.types.ts",
+    "db:types": "supabase gen types typescript --local | npx --yes prettier@3.9.9 --parser typescript --no-semi > supabase/functions/_shared/database.types.ts",
     "test": "jest",
     "deploy:backend": "bash scripts/deploy-backend.sh",
     "apk": "bash scripts/build-apk.sh",

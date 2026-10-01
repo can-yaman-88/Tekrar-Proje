@@ -66,6 +66,12 @@ describe('reportError', () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it('leaves Edge Function failures to the function, which already filed them', async () => {
+    telemetry.reportError(new AppError('server', 'llm down', { requestId: 'req-1' }), { source: 'mutation' });
+    await flush();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it('sends the same error once per window', async () => {
     telemetry.reportError(new Error('same'), { source: 'global' });
     telemetry.reportError(new Error('same'), { source: 'global' });

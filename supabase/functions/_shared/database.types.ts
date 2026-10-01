@@ -247,7 +247,7 @@ export type Database = {
           daily_log_id: string
           id: string
           reason: string | null
-          snapshot: Json
+          snapshot: NonNullable<Json>
           task_id: string
           user_id: string
         }
@@ -256,7 +256,7 @@ export type Database = {
           daily_log_id: string
           id?: string
           reason?: string | null
-          snapshot: Json
+          snapshot: NonNullable<Json>
           task_id: string
           user_id: string
         }
@@ -265,7 +265,7 @@ export type Database = {
           daily_log_id?: string
           id?: string
           reason?: string | null
-          snapshot?: Json
+          snapshot?: NonNullable<Json>
           task_id?: string
           user_id?: string
         }
@@ -598,7 +598,7 @@ export type Database = {
         Row: {
           auto_weekly_plan: boolean
           blocked_weekdays: number[]
-          capacity_overrides: Json
+          capacity_overrides: NonNullable<Json>
           created_at: string
           display_name: string | null
           id: string
@@ -613,7 +613,7 @@ export type Database = {
         Insert: {
           auto_weekly_plan?: boolean
           blocked_weekdays?: number[]
-          capacity_overrides?: Json
+          capacity_overrides?: NonNullable<Json>
           created_at?: string
           display_name?: string | null
           id: string
@@ -628,7 +628,7 @@ export type Database = {
         Update: {
           auto_weekly_plan?: boolean
           blocked_weekdays?: number[]
-          capacity_overrides?: Json
+          capacity_overrides?: NonNullable<Json>
           created_at?: string
           display_name?: string | null
           id?: string
@@ -1297,6 +1297,15 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_syllabus_ingestion: {
+        Args: {
+          p_llm_model: string
+          p_payload: Json
+          p_upload_id: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       apply_topic_review: {
         Args: {
           p_attempted?: number
@@ -1307,15 +1316,6 @@ export type Database = {
           p_source: string
           p_task_id?: string
           p_topic_id: string
-          p_user_id: string
-        }
-        Returns: Json
-      }
-      apply_syllabus_ingestion: {
-        Args: {
-          p_llm_model: string
-          p_payload: Json
-          p_upload_id: string
           p_user_id: string
         }
         Returns: Json
@@ -1333,7 +1333,14 @@ export type Database = {
         Args: { p_completions: Json; p_daily_log_id: string; p_user_id: string }
         Returns: number
       }
-      clear_llm_api_key: { Args: never; Returns: undefined }
+      clear_llm_api_key: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      configure_weekly_plan_cron: {
+        Args: { p_function_url: string; p_service_key: string }
+        Returns: string
+      }
       create_due_review_tasks: {
         Args: {
           p_budget_minutes: number
@@ -1343,16 +1350,16 @@ export type Database = {
         }
         Returns: Json
       }
-      configure_weekly_plan_cron: {
-        Args: { p_function_url: string; p_service_key: string }
-        Returns: string
-      }
       delete_daily_checkin: {
         Args: { p_daily_log_id: string; p_revert?: boolean }
         Returns: Json
       }
       ensure_review_tasks: {
-        Args: { p_budget_minutes?: number; p_max_topics?: number; p_today: string }
+        Args: {
+          p_budget_minutes?: number
+          p_max_topics?: number
+          p_today: string
+        }
         Returns: Json
       }
       hit_rate_limit: {
@@ -1366,7 +1373,10 @@ export type Database = {
       }
       is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
       is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
-      kick_off_weekly_plans: { Args: never; Returns: number }
+      kick_off_weekly_plans: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
       llm_key_secret_name: { Args: { p_user_id: string }; Returns: string }
       log_topic_review: {
         Args: { p_confidence: number; p_on?: string; p_topic_id: string }
@@ -1405,8 +1415,11 @@ export type Database = {
         Returns: boolean
       }
       revert_daily_checkin: { Args: { p_daily_log_id: string }; Returns: Json }
+      send_review_reminders: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
       set_llm_api_key: { Args: { p_key: string }; Returns: Json }
-      send_review_reminders: { Args: never; Returns: number }
       set_task_status: {
         Args: {
           p_confidence?: number
@@ -1503,8 +1516,7 @@ export type Tables<
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1528,8 +1540,7 @@ export type TablesInsert<
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1553,8 +1564,7 @@ export type TablesUpdate<
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
   EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1621,4 +1631,3 @@ export const Constants = {
     },
   },
 } as const
-
