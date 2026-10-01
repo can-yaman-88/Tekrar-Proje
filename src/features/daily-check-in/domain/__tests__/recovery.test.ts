@@ -25,27 +25,20 @@ const succeeded: CheckinOutcome = {
 
 describe('decideRecovery', () => {
   it('sunucuda tamamlanmışsa hata değil sonuç gösterilir', () => {
-    expect(decideRecovery({ outcome: succeeded, serverHasIt: true })).toEqual({ action: 'use-result' });
     // Telefon "başarısız" sansa bile: iş gerçekten yapıldıysa sonucu göster.
-    expect(decideRecovery({ outcome: succeeded, serverHasIt: false })).toEqual({ action: 'use-result' });
+    expect(decideRecovery(succeeded)).toEqual({ action: 'use-result' });
   });
 
-  it('sunucu işi aldığını söylediyse beklenir', () => {
-    expect(decideRecovery({ outcome: { state: 'processing' }, serverHasIt: true })).toEqual({ action: 'wait' });
+  it('sunucu işi aldıysa bağlantı kopsa da beklenir', () => {
+    expect(decideRecovery({ state: 'processing' })).toEqual({ action: 'wait' });
   });
 
   it('sunucu işi almadıysa beklenmez, gerçek hata gösterilir', () => {
-    expect(decideRecovery({ outcome: { state: 'processing' }, serverHasIt: false })).toEqual({
-      action: 'report-error',
-    });
+    expect(decideRecovery({ state: 'pending' })).toEqual({ action: 'report-error' });
   });
 
   it('sunucuda başarısız olduysa ya da kayıt yoksa hata gösterilir', () => {
-    expect(decideRecovery({ outcome: { state: 'failed', message: 'x' }, serverHasIt: true })).toEqual({
-      action: 'report-error',
-    });
-    expect(decideRecovery({ outcome: { state: 'missing' }, serverHasIt: true })).toEqual({
-      action: 'report-error',
-    });
+    expect(decideRecovery({ state: 'failed', message: 'x' })).toEqual({ action: 'report-error' });
+    expect(decideRecovery({ state: 'missing' })).toEqual({ action: 'report-error' });
   });
 });

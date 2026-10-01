@@ -17,21 +17,17 @@ export type RecoveryStep =
   /** Nothing happened on the server; the original error is the truth. */
   | { action: 'report-error' };
 
-export function decideRecovery({
-  outcome,
-  serverHasIt,
-}: {
-  outcome: CheckinOutcome;
-  /** True when the server itself said the check-in is already claimed. */
-  serverHasIt: boolean;
-}): RecoveryStep {
+export function decideRecovery(outcome: CheckinOutcome): RecoveryStep {
   switch (outcome.state) {
     case 'succeeded':
       return { action: 'use-result' };
     case 'processing':
-      // Waiting is only justified when the server confirmed it has the work;
-      // otherwise the request never arrived and waiting just stalls the screen.
-      return serverHasIt ? { action: 'wait' } : { action: 'report-error' };
+      // The server claimed it, so the work is under way whatever the phone
+      // saw: a connection dropped mid-answer, a wait the app gave up on.
+      return { action: 'wait' };
+    case 'pending':
+      // Never picked up: the request did not arrive, and waiting would only
+      // stall the screen.
     case 'failed':
     case 'missing':
       return { action: 'report-error' };

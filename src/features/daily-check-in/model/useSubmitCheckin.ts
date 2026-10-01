@@ -71,7 +71,7 @@ export function useSubmitCheckin() {
         // believes it failed: a dropped connection, a paused mutation, an app
         // that was closed mid-flight. Before reporting anything, look at what
         // the check-in actually did.
-        const recovered = await recoverOutcome(pending.id, error);
+        const recovered = await recoverOutcome(pending.id);
         if (recovered) return recovered;
         throw error;
       }
@@ -101,9 +101,13 @@ export function useSubmitCheckin() {
   });
 }
 
-/** How long a check-in already in flight is given to finish before giving up. */
-const RECOVERY_ATTEMPTS = 6;
-const RECOVERY_DELAY_MS = 2_500;
+/**
+ * How long a check-in the server is still working on is given to finish. The
+ * server gives the model 75 s; a connection that dropped early in that wait
+ * should still end in the answer, not in an error.
+ */
+const RECOVERY_WINDOW_MS = 90_000;
+const RECOVERY_DELAY_MS = 3_000;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -114,17 +118,16 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * null when there is genuinely nothing on the server — in which case the
  * original error is the honest thing to show.
  */
-async function recoverOutcome(dailyLogId: string, cause: unknown): Promise<DailyCheckinResponse | null> {
-  const serverHasIt = isAppError(cause) && cause.kind === 'conflict';
+async function recoverOutcome(dailyLogId: string): Promise<DailyCheckinResponse | null> {
+  const giveUpAt = Date.now() + RECOVERY_WINDOW_MS;
 
-  for (let attempt = 0; attempt < RECOVERY_ATTEMPTS; attempt++) {
+  for (;;) {
     const outcome = await dailyLogRepository.fetchOutcome(dailyLogId).catch(() => null);
     if (outcome === null) return null; // cannot even read it: report the original error
 
-    const step = decideRecovery({ outcome, serverHasIt });
+    const step = decideRecovery(outcome);
     if (step.action === 'use-result') return outcome.state === 'succeeded' ? outcome.result : null;
-    if (step.action === 'report-error') return null;
+    if (step.action === 'report-error' || Date.now() + RECOVERY_DELAY_MS > giveUpAt) return null;
     await wait(RECOVERY_DELAY_MS);
   }
-  return null;
 }

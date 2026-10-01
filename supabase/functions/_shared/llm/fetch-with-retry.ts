@@ -35,27 +35,45 @@ export function affordableTokensFrom(detail: string): number | null {
 
 interface RetryOptions {
   attempts: number;
-  timeoutMs: number;
+  /** Epoch ms by which the answer must be in, retries included. */
+  deadline: number;
 }
+
+/** Less time than this left, and another attempt could only time out. */
+const MIN_ATTEMPT_MS = 5_000;
+
+const TIMEOUT_HINT =
+  'Yapay zekâ modeli zamanında yanıt vermedi. Tekrar dene ya da Ayarlar’dan daha hızlı bir model seç.';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** POSTs JSON with a per-attempt timeout and jittered exponential backoff on transient failures. */
+const isTimeout = (error: unknown) => (error as { name?: unknown } | null)?.name === 'TimeoutError';
+
+/**
+ * POSTs JSON, retrying transient failures with jittered exponential backoff,
+ * all within one deadline.
+ *
+ * Each attempt gets whatever time is left rather than a fixed slice of it. A
+ * reasoning model that needs 40 s for a check-in used to be cut off at 30 s
+ * three times in a row, and the student was told the service was down.
+ */
 export async function postJsonWithRetry(
   url: string,
   headers: Record<string, string>,
   body: unknown,
-  { attempts, timeoutMs }: RetryOptions,
+  { attempts, deadline }: RetryOptions,
 ): Promise<unknown> {
   let lastError = 'unknown error';
+  let timedOut = false;
+  let attempt = 1;
 
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+  for (; ; attempt++) {
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(Math.max(deadline - Date.now(), 1)),
       });
       if (res.ok) {
         // Read as text so the size can be checked before anything parses it.
@@ -72,6 +90,7 @@ export async function postJsonWithRetry(
 
       const detail = (await res.text()).slice(0, 500);
       lastError = `HTTP ${res.status}: ${detail}`;
+      timedOut = false;
       if (!RETRYABLE_STATUS.has(res.status)) {
         // 4xx other than rate limits means our request is wrong — surface it, don't retry.
         throw new LlmError('invalid_output', `Provider rejected request (${lastError})`, {
@@ -82,10 +101,15 @@ export async function postJsonWithRetry(
     } catch (error) {
       if (error instanceof LlmError) throw error;
       lastError = errorMessage(error); // network error or timeout
+      timedOut = isTimeout(error);
     }
 
-    if (attempt < attempts) await sleep(2 ** attempt * 250 + Math.random() * 250);
+    const backoff = 2 ** attempt * 250 + Math.random() * 250;
+    if (attempt >= attempts || deadline - Date.now() - backoff < MIN_ATTEMPT_MS) break;
+    await sleep(backoff);
   }
 
-  throw new LlmError('unavailable', `Provider unavailable after ${attempts} attempts (${lastError})`);
+  throw new LlmError('unavailable', `Provider unavailable after ${attempt} attempts (${lastError})`, {
+    hint: timedOut ? TIMEOUT_HINT : undefined,
+  });
 }

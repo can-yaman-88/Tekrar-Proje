@@ -41,6 +41,7 @@ export interface OpenAiCompatibleOptions {
   name: LlmProviderName;
   apiKey: string;
   model: string;
+  /** For the whole answer, retries included. */
   timeoutMs: number;
   maxOutputTokens: number;
   baseUrl: string;
@@ -65,6 +66,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     assertPromptSize(request.user);
 
     const limit = Math.min(request.maxOutputTokens ?? this.options.maxOutputTokens, this.options.maxOutputTokens);
+    // One budget for the answer: the 402 retry below spends what is left of it.
+    const deadline = Date.now() + this.options.timeoutMs;
     const send = (maxTokens: number) =>
       postJsonWithRetry(
         `${this.options.baseUrl}/chat/completions`,
@@ -81,7 +84,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
             json_schema: { name: request.schemaName, strict: true, schema: toStrictJsonSchema(request.schema) },
           },
         },
-        { attempts: 3, timeoutMs: this.options.timeoutMs },
+        { attempts: 3, deadline },
       );
 
     let raw: unknown;

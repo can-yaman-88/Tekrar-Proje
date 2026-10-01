@@ -4,6 +4,9 @@ import type { NewDailyLog } from '../domain/daily-log';
 
 export type CheckinOutcome =
   | { state: 'succeeded'; result: DailyCheckinResponse }
+  /** Written by the phone, not yet picked up by the server. */
+  | { state: 'pending' }
+  /** Claimed by the server, which is working on it. */
   | { state: 'processing' }
   | { state: 'failed'; message: string | null }
   | { state: 'missing' };
@@ -43,7 +46,8 @@ export class DailyLogRepository extends BaseRepository {
         .maybeSingle(),
     );
     if (!log) return { state: 'missing' };
-    if (log.status === 'pending' || log.status === 'processing') return { state: 'processing' };
+    if (log.status === 'pending') return { state: 'pending' };
+    if (log.status === 'processing') return { state: 'processing' };
     if (log.status === 'failed') return { state: 'failed', message: log.error_message };
 
     // The server keeps the response it sent; when it is there, it is the answer

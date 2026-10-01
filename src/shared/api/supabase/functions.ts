@@ -6,13 +6,18 @@ import { supabase } from './client';
 
 export type EdgeFunctionName = 'daily-checkin' | 'ingest-syllabus' | 'generate-weekly-plan' | 'llm-models';
 
-/** LLM calls are slow, but never this slow: past this the user gets a real error. */
-const FUNCTION_TIMEOUT_MS = 90_000;
+/**
+ * LLM calls are slow, but never this slow: past this the user gets a real error.
+ * The server gives the model 75 s (LLM_TIMEOUT_MS) and always answers before
+ * this, with its own error if need be; it must stay the longer of the two.
+ */
+const FUNCTION_TIMEOUT_MS = 120_000;
 
 function withTimeout<T>(work: Promise<T>, name: EdgeFunctionName): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    // The phone is online; the server is what kept us waiting.
     const timer = setTimeout(
-      () => reject(new AppError('network', 'Sunucu zamanında yanıt vermedi. Tekrar dene.')),
+      () => reject(new AppError('server', 'Sunucu zamanında yanıt vermedi. Tekrar dene.')),
       FUNCTION_TIMEOUT_MS,
     );
     work.then(resolve, reject).finally(() => clearTimeout(timer));

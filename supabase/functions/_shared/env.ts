@@ -7,7 +7,13 @@ const EnvSchema = z
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     LLM_PROVIDER: z.enum(['openai', 'openrouter', 'gemini']).default('openai'),
     LLM_MODEL: z.string().min(1).optional(),
-    LLM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+    /**
+     * How long one model answer may take, retries included. Reasoning models
+     * routinely need 30–60 s for a check-in. Keep it well under the app's own
+     * wait (FUNCTION_TIMEOUT_MS in src/shared/api/supabase/functions.ts), so
+     * the student hears why it failed instead of a dropped request.
+     */
+    LLM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(75_000),
     /**
      * Ceiling on the answer, in tokens. Sent explicitly because gateways that
      * bill per reservation (OpenRouter) otherwise reserve the model's whole

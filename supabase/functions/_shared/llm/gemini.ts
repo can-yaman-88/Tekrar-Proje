@@ -24,6 +24,7 @@ export class GeminiProvider implements LlmProvider {
   constructor(
     private readonly apiKey: string,
     private readonly model: string,
+    /** For the whole answer, retries included. */
     private readonly timeoutMs: number,
     private readonly maxOutputTokens: number,
   ) {}
@@ -54,7 +55,7 @@ export class GeminiProvider implements LlmProvider {
           maxOutputTokens: Math.min(request.maxOutputTokens ?? this.maxOutputTokens, this.maxOutputTokens),
         },
       },
-      { attempts: 3, timeoutMs: this.timeoutMs },
+      { attempts: 3, deadline: Date.now() + this.timeoutMs },
     );
 
     const parsed = GenerateContentSchema.safeParse(raw);

@@ -1,6 +1,6 @@
 import { CheckInForm, CheckInResult, useCheckinForm } from '@features/daily-check-in';
 import { useReportReminders } from '@features/reminders';
-import { AppText, makeStyles } from '@shared/ui';
+import { AppText, makeStyles, Screen } from '@shared/ui';
 import { useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 
@@ -12,24 +12,27 @@ export function CheckInScreen() {
   useReportReminders(form.result);
   const styles = useStyles();
 
+  // Without the bottom edge the send and retry buttons sat under Android's navigation bar.
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <AppText variant="title" accessibilityRole="header">
-          {form.result ? 'Plan güncellendi' : 'Bugün nasıl geçti?'}
-        </AppText>
-        {form.result ? (
-          <CheckInResult result={form.result} onDone={() => router.back()} />
-        ) : (
-          <>
-            <AppText tone="muted">
-              Bir arkadaşına anlatır gibi yaz. Yapamadığın işler otomatik olarak yeniden planlanır.
-            </AppText>
-            <CheckInForm form={form} />
-          </>
-        )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    <Screen edges={['bottom']}>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <AppText variant="title" accessibilityRole="header">
+            {form.result ? 'Plan güncellendi' : 'Bugün nasıl geçti?'}
+          </AppText>
+          {form.result ? (
+            <CheckInResult result={form.result} onDone={() => router.back()} />
+          ) : (
+            <>
+              <AppText tone="muted">
+                Bir arkadaşına anlatır gibi yaz. Yapamadığın işler otomatik olarak yeniden planlanır.
+              </AppText>
+              <CheckInForm form={form} />
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
