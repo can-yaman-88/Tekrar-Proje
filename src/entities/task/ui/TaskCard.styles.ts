@@ -25,6 +25,7 @@ export const useTaskCardStyles = makeStyles(({ colors, radii, spacing }) => ({
   },
   chipWarning: { backgroundColor: colors.warningMuted },
   chipDanger: { backgroundColor: colors.dangerMuted },
+  chipWithIcon: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   // The day's share is the one thing on the card the student acts on now, so
   // it sits on its own line rather than among the grey chips.
   subtasks: { gap: spacing.xxs, marginTop: spacing.xs, paddingLeft: spacing.xs },

@@ -1,4 +1,13 @@
 import {
+  ATTACHMENT_SCOPE,
+  attachmentKeys,
+  attachmentMutationKeys,
+  attachmentRetry,
+  runAddAttachment,
+  runRemoveAttachment,
+  runRenameAttachment,
+} from '@entities/attachment';
+import {
   PROFILE_SCOPE,
   profileKeys,
   profileMutationKeys,
@@ -103,6 +112,20 @@ export function registerMutationDefaults(): void {
   queryClient.setMutationDefaults(topicMistakeMutationKeys.resolve, { ...book, mutationFn: runResolveMistake });
   queryClient.setMutationDefaults(topicMistakeMutationKeys.reopen, { ...book, mutationFn: runReopenMistake });
   queryClient.setMutationDefaults(topicMistakeMutationKeys.remove, { ...book, mutationFn: runDeleteMistake });
+  // Attachments drain as one ordered queue too, and an upload is retried
+  // through a dropped connection rather than given up on.
+  const attachments = {
+    scope: ATTACHMENT_SCOPE,
+    retry: attachmentRetry,
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: attachmentKeys.all }),
+        queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+      ]),
+  };
+  queryClient.setMutationDefaults(attachmentMutationKeys.add, { ...attachments, mutationFn: runAddAttachment });
+  queryClient.setMutationDefaults(attachmentMutationKeys.rename, { ...attachments, mutationFn: runRenameAttachment });
+  queryClient.setMutationDefaults(attachmentMutationKeys.remove, { ...attachments, mutationFn: runRemoveAttachment });
   const profile = {
     scope: PROFILE_SCOPE,
     onSettled: () => queryClient.invalidateQueries({ queryKey: profileKeys.all }),

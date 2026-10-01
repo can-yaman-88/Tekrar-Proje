@@ -1,6 +1,7 @@
 import { NoteItem } from '@entities/task-note';
 import { MistakeList } from '@entities/topic-mistake';
 import { isMixedSet } from '@entities/task';
+import { AttachmentSection } from '@features/attachments';
 import { MixedSetCard, MixedSetSheet, useMixedSet } from '@features/mixed-set';
 import { NoteComposer } from '@features/task-note-add';
 import { PriorityToggle, useTaskPriority } from '@features/task-priority';
@@ -88,6 +89,8 @@ export function TaskDetailScreen() {
           />
 
           {isMixedSet(detail.task) ? <MixedSetCard task={detail.task} controller={mixedSet} /> : null}
+
+          <AttachmentSection taskId={detail.task.id} topicId={detail.task.topic.id} />
 
           <TaskSubtaskSection task={detail.task} />
 

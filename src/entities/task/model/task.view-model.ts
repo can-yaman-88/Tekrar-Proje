@@ -33,6 +33,8 @@ export interface TaskCardModel {
   subtaskProgress: string | null;
   /** Marked urgent by the student; open work only — a finished task is not urgent. */
   isUrgent: boolean;
+  /** PDFs, photos and links on the task: the paperclip on the card. */
+  attachmentCount: number;
 }
 
 export interface SubtaskRow {
@@ -102,5 +104,6 @@ export function toTaskCardModel(
         ? null
         : `${subtasks.filter((step) => step.status === 'completed').length}/${subtasks.length}`,
     isUrgent: task.isPriority && (task.status === 'pending' || task.status === 'in_progress'),
+    attachmentCount: task.attachmentCount,
   };
 }

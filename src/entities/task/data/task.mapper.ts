@@ -4,7 +4,7 @@ import type { Task } from '../domain/task.types';
 
 /** Single source of truth for the columns the Task domain model needs. */
 export const TASK_SELECT =
-  'id, type, title, instructions, target_count, completed_count, correct_count, estimated_minutes, due_date, starts_on, day_allocations, parent_task_id, status, confidence_level, source, is_priority, completed_at, topic:topics!tasks_topic_fk(id, title, course:courses!topics_course_fk(id, name, code, color_hex))';
+  'id, type, title, instructions, target_count, completed_count, correct_count, estimated_minutes, due_date, starts_on, day_allocations, parent_task_id, status, confidence_level, source, is_priority, completed_at, topic:topics!tasks_topic_fk(id, title, course:courses!topics_course_fk(id, name, code, color_hex)), attachments:attachments!attachments_task_fk(count)';
 
 type TaskColumns = Pick<
   Tables<'tasks'>,
@@ -29,6 +29,8 @@ type TaskColumns = Pick<
 
 export interface TaskRow extends TaskColumns {
   topic: { id: string; title: string; course: CourseRefRow };
+  /** PostgREST's embedded count: one row holding the number. */
+  attachments?: { count: number }[] | null;
 }
 
 /**
@@ -67,5 +69,6 @@ export function toTask(row: TaskRow): Task {
     completedAt: row.completed_at,
     topic: { id: row.topic.id, title: row.topic.title },
     course: toCourseRef(row.topic.course),
+    attachmentCount: row.attachments?.[0]?.count ?? 0,
   };
 }

@@ -1,4 +1,5 @@
 import { ConfidenceSheet } from '@entities/topic';
+import { AttachmentSection } from '@features/attachments';
 import { MistakeComposer, MistakeEntry } from '@features/mistake-book';
 import {
   AppText,
@@ -182,6 +183,8 @@ export function TopicReviewScreen() {
               )}
             </Card>
           </View>
+
+          <AttachmentSection topicId={topicId} title="Konunun ekleri" />
 
           <View style={styles.section}>
             <AppText variant="subtitle">Görevler</AppText>

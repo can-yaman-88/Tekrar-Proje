@@ -76,9 +76,23 @@ const config: ExpoConfig = {
     [
       'expo-image-picker',
       {
-        photosPermission: 'Değerlendirmene ödev ya da not fotoğrafı eklemek için galerini açar.',
-        cameraPermission: 'Değerlendirmene ödev ya da not fotoğrafı çekip eklemek için kamerayı açar.',
+        photosPermission: 'Görevlerine ve değerlendirmene ödev ya da not fotoğrafı eklemek için galerini açar.',
+        cameraPermission: 'Görevlerine ve değerlendirmene ödev ya da not fotoğrafı çekip eklemek için kamerayı açar.',
         microphonePermission: false,
+      },
+    ],
+    [
+      // "Paylaş → Tekrar": a link, PDF or photo from another app becomes an
+      // attachment on a task (src/pages/share-target). Android only for now:
+      // the iOS share extension needs an App Group registered with Apple.
+      'expo-sharing',
+      {
+        android: {
+          enabled: true,
+          singleShareMimeTypes: ['text/plain', 'application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+          multipleShareMimeTypes: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+        },
+        ios: { enabled: false },
       },
     ],
     [

@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(133);
+select plan(154);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -1147,6 +1147,182 @@ select throws_ok(
   'P0002',
   null,
   'B cannot score A''s set'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 21. Attachments: on a task, through it on the topic, never someone else's.
+-- ---------------------------------------------------------------------------
+insert into public.tasks (id, user_id, topic_id, type, title, due_date, parent_task_id) values
+  ('e2000000-0000-4000-8000-0000000000a1', 'aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a',
+   'learning', 'Ekli öğrenme', current_date, null),
+  ('e2000000-0000-4000-8000-0000000000a2', 'aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a',
+   'problem_set', 'Ekli adım', current_date, 'e2000000-0000-4000-8000-0000000000a1'),
+  ('e2000000-0000-4000-8000-0000000000a3', 'aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a',
+   'spaced_review', 'Aynı konunun tekrarı', current_date + 7, null),
+  ('e2000000-0000-4000-8000-0000000000a4', 'aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a',
+   'problem_set', 'Silinecek görev', current_date, null);
+
+-- What the Storage API would have stored: A's slides, and B's photo.
+insert into storage.objects (bucket_id, name, metadata) values
+  ('attachments', 'aaaaaaaa-0000-4000-8000-000000000001/f3000000-0000-4000-8000-0000000000a2.pdf',
+   '{"size": 123456, "mimetype": "application/pdf"}'),
+  ('attachments', 'aaaaaaaa-0000-4000-8000-000000000001/f3000000-0000-4000-8000-0000000000a5.jpg',
+   '{"size": 2048, "mimetype": "image/jpeg"}'),
+  ('attachments', 'bbbbbbbb-0000-4000-8000-000000000002/f3000000-0000-4000-8000-0000000000b1.jpg',
+   '{"size": 4096, "mimetype": "image/jpeg"}');
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select lives_ok(
+  $$insert into public.attachments (id, user_id, topic_id, task_id, kind, title, url) values
+    ('f3000000-0000-4000-8000-0000000000a1', 'aaaaaaaa-0000-4000-8000-000000000001',
+     'd0000000-0000-4000-8000-00000000000a', 'e2000000-0000-4000-8000-0000000000a1', 'link',
+     '  Ders   videosu ', 'https://www.youtube.com/watch?v=abc')$$,
+  'a student links a video to their task'
+);
+select is(
+  (select title from public.attachments where id = 'f3000000-0000-4000-8000-0000000000a1'),
+  'Ders videosu',
+  'the title is tidied on the way in'
+);
+-- The phone claims 1 byte and a PNG; storage knows better.
+select lives_ok(
+  $$insert into public.attachments (id, user_id, topic_id, task_id, kind, title, storage_path, mime_type, size_bytes) values
+    ('f3000000-0000-4000-8000-0000000000a2', 'aaaaaaaa-0000-4000-8000-000000000001',
+     'd0000000-0000-4000-8000-00000000000b', 'e2000000-0000-4000-8000-0000000000a2', 'file', 'Slaytlar',
+     'aaaaaaaa-0000-4000-8000-000000000001/f3000000-0000-4000-8000-0000000000a2.pdf', 'image/png', 1)$$,
+  'an uploaded PDF is attached to a step'
+);
+select is(
+  (select array[size_bytes::text, mime_type, topic_id::text] from public.attachments
+    where id = 'f3000000-0000-4000-8000-0000000000a2'),
+  array['123456', 'application/pdf', 'd0000000-0000-4000-8000-00000000000a'],
+  'size and type come from storage, the topic from the task'
+);
+select throws_ok(
+  $$insert into public.attachments (user_id, topic_id, task_id, kind, title, storage_path, mime_type, size_bytes) values
+    ('aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a',
+     'e2000000-0000-4000-8000-0000000000a1', 'file', 'Hayalet',
+     'aaaaaaaa-0000-4000-8000-000000000001/yok.pdf', 'application/pdf', 10)$$,
+  '23503',
+  null,
+  'a row cannot point at a file that was never uploaded'
+);
+select throws_ok(
+  $$insert into public.attachments (user_id, topic_id, kind, title, url) values
+    ('aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a', 'link', 'Kötü',
+     'javascript:alert(1)')$$,
+  '23514',
+  null,
+  'only web addresses are links'
+);
+select is(
+  (select relation from public.task_materials('e2000000-0000-4000-8000-0000000000a2')
+    where id = 'f3000000-0000-4000-8000-0000000000a1'),
+  'group',
+  'a step sees what was added to its learning task'
+);
+select is(
+  (select array_agg(relation order by relation) from public.task_materials('e2000000-0000-4000-8000-0000000000a3')),
+  array['topic', 'topic'],
+  'the review of the same topic sees the topic''s material'
+);
+select throws_ok(
+  $$update public.attachments set storage_path = 'aaaaaaaa-0000-4000-8000-000000000001/x.pdf'
+     where id = 'f3000000-0000-4000-8000-0000000000a2'$$,
+  '23514',
+  null,
+  'a file row cannot be pointed at another file'
+);
+select lives_ok(
+  $$update public.attachments set title = 'Hafta 3 slaytları' where id = 'f3000000-0000-4000-8000-0000000000a2'$$,
+  'renaming is allowed'
+);
+
+-- Deleting a task never deletes what the student added to it.
+select lives_ok(
+  $$insert into public.attachments (id, user_id, topic_id, task_id, kind, title, storage_path, mime_type, size_bytes) values
+    ('f3000000-0000-4000-8000-0000000000a5', 'aaaaaaaa-0000-4000-8000-000000000001',
+     'd0000000-0000-4000-8000-00000000000a', 'e2000000-0000-4000-8000-0000000000a4', 'file', 'Tahta',
+     'aaaaaaaa-0000-4000-8000-000000000001/f3000000-0000-4000-8000-0000000000a5.jpg', 'image/jpeg', 1)$$,
+  'a photo is attached to a task that will be deleted'
+);
+delete from public.tasks where id = 'e2000000-0000-4000-8000-0000000000a4';
+select is(
+  (select relation from public.topic_materials('d0000000-0000-4000-8000-00000000000a')
+    where id = 'f3000000-0000-4000-8000-0000000000a5'),
+  'topic',
+  'its task deleted, the photo stays with the topic'
+);
+delete from public.attachments where id = 'f3000000-0000-4000-8000-0000000000a5';
+select is(
+  (select path from public.storage_trash),
+  'aaaaaaaa-0000-4000-8000-000000000001/f3000000-0000-4000-8000-0000000000a5.jpg',
+  'a deleted file row leaves its path for the app to clear from storage'
+);
+select throws_ok(
+  $$select public.attachment_bytes_used('bbbbbbbb-0000-4000-8000-000000000002')$$,
+  '42501',
+  null,
+  'nobody reads another student''s storage use'
+);
+select lives_ok(
+  $$insert into storage.objects (bucket_id, name, metadata) values
+    ('attachments', 'aaaaaaaa-0000-4000-8000-000000000001/yeni.pdf', '{"size": 10, "mimetype": "application/pdf"}')$$,
+  'a student uploads into their own folder'
+);
+reset role;
+
+-- A folder at 300 MB takes nothing more.
+insert into storage.objects (bucket_id, name, metadata) values
+  ('attachments', 'aaaaaaaa-0000-4000-8000-000000000001/buyuk.pdf', '{"size": 314572800, "mimetype": "application/pdf"}');
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}';
+select throws_ok(
+  $$insert into storage.objects (bucket_id, name, metadata) values
+    ('attachments', 'aaaaaaaa-0000-4000-8000-000000000001/fazla.pdf', '{"size": 10, "mimetype": "application/pdf"}')$$,
+  '42501',
+  null,
+  'a full folder refuses the next upload'
+);
+reset role;
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select is(
+  (select count(*)::int from public.attachments) + (select count(*)::int from public.storage_trash)
+    + (select count(*)::int from public.task_materials('e2000000-0000-4000-8000-0000000000a1')),
+  0,
+  'B sees none of A''s attachments, trash or materials'
+);
+select throws_ok(
+  $$insert into public.attachments (user_id, topic_id, task_id, kind, title, url) values
+    ('bbbbbbbb-0000-4000-8000-000000000002', 'd0000000-0000-4000-8000-00000000000b',
+     'e2000000-0000-4000-8000-0000000000a1', 'link', 'Sızma', 'https://example.com')$$,
+  '23503',
+  null,
+  'B cannot hang an attachment off A''s task'
+);
+select throws_ok(
+  $$insert into public.attachments (user_id, topic_id, kind, title, url) values
+    ('aaaaaaaa-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-00000000000a', 'link', 'Sahte', 'https://example.com')$$,
+  '42501',
+  null,
+  'B cannot create an attachment in A''s name'
+);
+select throws_ok(
+  $$insert into storage.objects (bucket_id, name, metadata) values
+    ('attachments', 'aaaaaaaa-0000-4000-8000-000000000001/sizma.pdf', '{"size": 10}')$$,
+  '42501',
+  null,
+  'B cannot upload into A''s folder'
+);
+select is(
+  (select count(*)::int from storage.objects where bucket_id = 'attachments'),
+  1,
+  'B sees only their own files'
 );
 reset role;
 

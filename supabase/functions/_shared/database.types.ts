@@ -79,6 +79,73 @@ export type Database = {
           },
         ]
       }
+      attachments: {
+        Row: {
+          created_at: string
+          id: string
+          kind: Database["public"]["Enums"]["attachment_kind"]
+          mime_type: string | null
+          size_bytes: number | null
+          storage_path: string | null
+          task_id: string | null
+          title: string
+          topic_id: string
+          updated_at: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind: Database["public"]["Enums"]["attachment_kind"]
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path?: string | null
+          task_id?: string | null
+          title: string
+          topic_id: string
+          updated_at?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["attachment_kind"]
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path?: string | null
+          task_id?: string | null
+          title?: string
+          topic_id?: string
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attachments_task_fk"
+            columns: ["task_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "attachments_topic_fk"
+            columns: ["topic_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "attachments_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_sessions: {
         Row: {
           course_id: string
@@ -825,6 +892,30 @@ export type Database = {
           },
         ]
       }
+      storage_trash: {
+        Row: {
+          bucket: string
+          created_at: string
+          id: number
+          path: string
+          user_id: string
+        }
+        Insert: {
+          bucket: string
+          created_at?: string
+          id?: never
+          path: string
+          user_id: string
+        }
+        Update: {
+          bucket?: string
+          created_at?: string
+          id?: never
+          path?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       syllabus_uploads: {
         Row: {
           course_id: string | null
@@ -1486,6 +1577,8 @@ export type Database = {
         }
         Returns: Json
       }
+      attachment_bytes_used: { Args: { p_user: string }; Returns: number }
+      attachment_space_used: { Args: never; Returns: number }
       backdate_checkin_completions: {
         Args: { p_completions: Json; p_daily_log_id: string; p_user_id: string }
         Returns: number
@@ -1606,6 +1699,42 @@ export type Database = {
         }
         Returns: Record<string, unknown>
       }
+      task_materials: {
+        Args: { p_task_id: string }
+        Returns: {
+          bucket: string
+          created_at: string
+          editable: boolean
+          id: string
+          kind: Database["public"]["Enums"]["attachment_kind"]
+          mime_type: string
+          relation: string
+          size_bytes: number
+          storage_path: string
+          task_id: string
+          task_title: string
+          title: string
+          url: string
+        }[]
+      }
+      topic_materials: {
+        Args: { p_topic_id: string }
+        Returns: {
+          bucket: string
+          created_at: string
+          editable: boolean
+          id: string
+          kind: Database["public"]["Enums"]["attachment_kind"]
+          mime_type: string
+          relation: string
+          size_bytes: number
+          storage_path: string
+          task_id: string
+          task_title: string
+          title: string
+          url: string
+        }[]
+      }
       undo_task_review: {
         Args: { p_task_id: string; p_user_id: string }
         Returns: boolean
@@ -1615,6 +1744,7 @@ export type Database = {
       user_today: { Args: { p_user_id: string }; Returns: string }
     }
     Enums: {
+      attachment_kind: "file" | "link"
       exam_kind: "quiz" | "midterm" | "final" | "lab" | "other"
       processing_status: "pending" | "processing" | "succeeded" | "failed"
       task_source:
@@ -1767,6 +1897,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      attachment_kind: ["file", "link"],
       exam_kind: ["quiz", "midterm", "final", "lab", "other"],
       processing_status: ["pending", "processing", "succeeded", "failed"],
       task_source: [

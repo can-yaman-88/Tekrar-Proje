@@ -1,3 +1,4 @@
+import { clearAttachmentFiles } from '@entities/attachment';
 import { useSessionStore } from '@entities/session';
 import { useCheckinDraftStore } from '@features/daily-check-in';
 import { clearHomeWidget } from '@features/home-widget';
@@ -36,6 +37,7 @@ export function useAuthListener(): void {
         useCheckinDraftStore.getState().reset();
         void cancelAllReminders();
         clearHomeWidget();
+        clearAttachmentFiles();
       }
     });
 

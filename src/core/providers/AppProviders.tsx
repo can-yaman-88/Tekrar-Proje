@@ -5,6 +5,7 @@ import { ToastHost } from '@shared/ui';
 import type { ReactNode } from 'react';
 import { Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useAttachmentTrash } from '../bootstrap/attachmentHousekeeping';
 import { installErrorReporting, useFlushPendingCrash } from '../bootstrap/errorReporting';
 import { installAppLifecycle } from '../bootstrap/lifecycle';
 import { registerMutationDefaults } from '../bootstrap/mutationDefaults';
@@ -22,6 +23,7 @@ function AuthBridge() {
   useFlushPendingCrash();
   useTimezoneSync();
   useNotificationActions();
+  useAttachmentTrash();
   return null;
 }
 

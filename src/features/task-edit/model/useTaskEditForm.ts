@@ -89,6 +89,11 @@ export function useTaskEditForm(task: Task, options: { onDeleted: () => void }) 
   });
 
   return {
+    // Deleting a task never deletes its material: it stays with the topic.
+    deleteMessage:
+      task.attachmentCount > 0
+        ? 'Bu görev ve notları kalıcı olarak silinecek. Ekleri silinmez; konunun eklerinde kalır.'
+        : 'Bu görev ve notları kalıcı olarak silinecek.',
     control: form.control,
     errors: form.formState.errors,
     isDirty: form.formState.isDirty,

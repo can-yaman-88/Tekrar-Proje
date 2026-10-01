@@ -28,6 +28,7 @@ export default function AppLayout() {
       <Stack.Screen name="exam/[examId]" options={{ title: 'Sınav modu' }} />
       <Stack.Screen name="weekly-summary" options={{ title: 'Haftalık özet' }} />
       <Stack.Screen name="error-digest" options={{ title: 'Hata özeti' }} />
+      <Stack.Screen name="expo-sharing" options={{ presentation: 'modal', title: 'Göreve ekle' }} />
     </Stack>
   );
 }

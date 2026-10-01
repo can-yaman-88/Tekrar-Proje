@@ -33,7 +33,7 @@ export function TaskEditForm({ form }: { form: TaskEditController }) {
   const styles = useStyles();
 
   const confirmDelete = () =>
-    Alert.alert('Görevi sil', 'Bu görev ve notları kalıcı olarak silinecek.', [
+    Alert.alert('Görevi sil', form.deleteMessage, [
       { text: 'Vazgeç', style: 'cancel' },
       { text: 'Sil', style: 'destructive', onPress: form.onDelete },
     ]);

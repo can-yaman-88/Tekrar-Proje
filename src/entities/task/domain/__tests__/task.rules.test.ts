@@ -23,6 +23,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   completedAt: null,
   topic: { id: 'top', title: 'Kafes' },
   course: { id: 'c', name: 'Statik', code: 'ME 201', colorHex: null },
+  attachmentCount: 0,
   ...over,
 });
 

@@ -92,6 +92,18 @@ export const TaskCard = memo(function TaskCard({
               </AppText>
             </View>
           ))}
+          {model.attachmentCount > 0 ? (
+            <View
+              style={[styles.chip, styles.chipWithIcon]}
+              accessible
+              accessibilityLabel={`${model.attachmentCount} ek`}
+            >
+              <Ionicons name="attach" size={13} color={colors.textMuted} />
+              <AppText variant="caption" tone="muted">
+                {model.attachmentCount}
+              </AppText>
+            </View>
+          ) : null}
         </View>
 
         {model.subtasks.length > 0 ? (

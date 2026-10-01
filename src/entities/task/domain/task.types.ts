@@ -44,6 +44,8 @@ export interface Task {
   completedAt: string | null;
   topic: { id: string; title: string };
   course: CourseRef;
+  /** PDFs, photos and links added to this task (not its topic's others). */
+  attachmentCount: number;
 }
 
 /** A task with its steps, as the board shows it. */

@@ -52,7 +52,7 @@ npx tsc --noEmit        # tip kontrolü
 npx expo lint           # katman sınırları dahil
 npx jest                # alan (domain) ve altyapı testleri (ayar: jest.config.js)
 npx expo-doctor         # bağımlılık uyumu
-npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 133 test)
+npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 154 test)
 ```
 
 Edge Function testleri (Deno kurulu değilse Docker ile):
@@ -233,6 +233,44 @@ Yerel modül olduğu için widget **yeni bir APK** ister: `rm -rf android` sonra
 Kod: `src/features/home-widget` (çizim ve kararlar saf fonksiyonlar, testli),
 `src/core/bootstrap/homeWidget.ts` ve giriş dosyası `index.ts` (Android widget'ı çizmek için
 uygulamanın JS'ini ekransız başlatır; görev o anda kayıtlı olmalı).
+
+## Ekler: PDF, fotoğraf, link
+
+Görev ekranındaki **Ekler** bölümünden PDF (birden çok), galeriden fotoğraf (birden çok), kamera
+fotoğrafı ya da link eklenir. Bir ek her zaman bir **konuya** aittir; eklendiği görev de kaydedilir:
+
+- Görev ekranı yakından uzağa listeler: **bu görevin ekleri**, **grubun ekleri** (öğrenme görevi,
+  adımları, kardeş adımlar), **görevin çıktığı dosya** (değerlendirmeyle gönderilen ödev PDF'i)
+  ve **konunun diğer ekleri**. Pazartesi derste eklenen slaytlar üç hafta sonraki tekrar görevinde
+  de oradadır. Konu ekranında konunun bütün ekleri toplanır; oradan doğrudan konuya da eklenir.
+- **Görev silinince ekleri silinmez**, konuda kalır (`task_id` boşalır). Haftalık planın ya da sınav
+  planının dokunulmamış işleri değiştirmesi de böyledir: öğrencinin eklediği hiçbir şey otomatik
+  temizlikle gitmez. Silme onayı bunu söyler.
+- **Açma:** link tarayıcıda (YouTube linki YouTube uygulamasında), PDF telefonun PDF
+  görüntüleyicisinde, fotoğraf uygulamanın kendi görüntüleyicisinde açılır (Android'de "galeride aç"
+  ile yakınlaştırılır). Bir kez açılan dosya telefonda saklanır; ikinci açış bağlantı istemez.
+  `⋯` menüsünde paylaş, yeniden adlandır (linkte adres de), sil var.
+- **Link adı** boş bırakılırsa sayfanın kendi adı kullanılır (YouTube için oEmbed); o da yoksa site
+  ve yol ("Vikipedi · Gauss yasası").
+- **Çevrimdışı:** eklenen dosya önce telefonda bir giden kutusuna kopyalanır, satır hemen görünür
+  ("gönderilmeyi bekliyor"), bağlantı gelince yüklenir — uygulama kapanıp açılsa bile. Kimlik
+  cihazda üretildiği için yarım kalan yükleme tekrarlanınca çift kayıt oluşmaz.
+- **Paylaş → Tekrar (Android):** tarayıcıdan bir sayfa, Drive'dan bir PDF ya da galeriden
+  fotoğraflar paylaşılınca Tekrar listede çıkar; açılan ekranda göreve dokunmak yeter. Metnin
+  içindeki link ayıklanır. iOS paylaşım eklentisi Apple'da bir App Group kaydı istediği için kapalı.
+- Görev kartında ataş simgesi kaç ek olduğunu gösterir.
+
+**Sınırlar ve bütünlük:** dosya başına 20 MB, öğrenci başına 300 MB (doluysa yükleme reddedilir;
+eski ekleri silmek yer açar), görev başına 30, konu başına 200 ek. Yalnızca PDF, JPEG, PNG, WebP;
+linkler yalnızca `http(s)`. Dosyalar özel `attachments` kovasında, öğrencinin kendi klasöründedir.
+Bir satır ancak gerçekten yüklenmiş bir dosyayı gösterebilir; boyutu ve türü telefondan değil
+depolamadan alınır. Depolama SQL'den silinemediği için silinen satırın yolu `storage_trash`
+tablosuna düşer; uygulama öne geldiğinde bunları Storage API ile siler (başka cihazda ya da bir
+konu/ders silinirken giden ekler dahil). Çıkış yapınca telefondaki kopyalar silinir.
+
+Yerel modüller (`expo-sharing`, `expo-intent-launcher`) eklendiği için **yeni bir APK** gerekir.
+Kod: `src/entities/attachment`, `src/features/attachments`, `src/pages/share-target`,
+`supabase/migrations/20261004000000_attachments.sql`.
 
 ## Çalışma zamanlayıcısı
 
@@ -593,7 +631,7 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 133 pgTAP testi
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 154 pgTAP testi
   bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
   satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
 - **Görev durumu tek kapıdan değişir.** `guard_task_status` tetikleyicisi, uygulamanın
@@ -625,6 +663,8 @@ OpenRouter etkinlik kaydında da görünmez.
   alanın kuyruğu sırayla boşalır (çevrimdışı eklenip sonra düzeltilen madde önce eklenir).
   Yeni maddenin kimliği cihazda üretilir; aynı yazma iki kez gitse de çift kayıt oluşmaz.
   Sunucu reddederse ekran eski haline döner ve nedenini söyler.
+- Ekler (dosya, link, yeniden adlandırma, silme) kendi kuyruğundadır; dosya telefonda bir giden
+  kutusunda bekler ve bağlantı kesilirse yükleme birkaç kez yeniden denenir.
 - Yapay zekâ anahtarı kuyruğa girmez: bağlantı yoksa hemen hata verir, sır diske yazılmaz.
 - Görevler ekranındaki şerit hem çevrimdışı olduğunu hem de kaç değişikliğin beklediğini yazar.
 
