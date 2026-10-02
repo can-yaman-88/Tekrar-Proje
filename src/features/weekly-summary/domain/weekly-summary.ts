@@ -30,6 +30,12 @@ export interface SummarySession {
   estimatedMinutes: number | null;
 }
 
+/** Time from the Focus Timer app: real minutes, but not tied to a task. */
+export interface SummaryTimerSession {
+  startedAt: string;
+  minutes: number;
+}
+
 export interface SummaryTopic {
   id: string;
   title: string;
@@ -106,6 +112,8 @@ export interface WeekSummaryInput {
   weekStart: IsoDate;
   tasks: readonly SummaryTask[];
   sessions: readonly SummarySession[];
+  /** Focus Timer stretches: counted as measured time, never in the estimate calibration. */
+  timerSessions?: readonly SummaryTimerSession[];
   /** Days with a processed check-in. */
   checkinDates: readonly IsoDate[];
   topics: readonly SummaryTopic[];
@@ -115,6 +123,7 @@ export function buildWeekSummary({
   weekStart,
   tasks,
   sessions,
+  timerSessions = [],
   checkinDates,
   topics,
 }: WeekSummaryInput): WeekSummary {
@@ -126,15 +135,17 @@ export function buildWeekSummary({
   const open = inWeek.filter((task) => task.status === 'pending' || task.status === 'in_progress').length;
   const total = inWeek.length;
 
-  const weekSessions = sessions.filter((session) => {
+  const inThisWeek = (session: { startedAt: string }) => {
     const day = localDateOf(session.startedAt);
     return day >= weekStart && day <= weekEnd;
-  });
-  const measuredMinutes = weekSessions.reduce((sum, session) => sum + session.minutes, 0);
+  };
+  const weekSessions = sessions.filter(inThisWeek);
+  const weekTimerSessions = timerSessions.filter(inThisWeek);
+  const measuredMinutes = [...weekSessions, ...weekTimerSessions].reduce((sum, session) => sum + session.minutes, 0);
   const estimatedMinutes = completedTasks.reduce((sum, task) => sum + (task.estimatedMinutes ?? 0), 0);
 
   const minutesByDay = new Map<IsoDate, number>();
-  for (const session of weekSessions) {
+  for (const session of [...weekSessions, ...weekTimerSessions]) {
     const day = localDateOf(session.startedAt);
     minutesByDay.set(day, (minutesByDay.get(day) ?? 0) + session.minutes);
   }

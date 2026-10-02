@@ -1,5 +1,5 @@
 import { useWeeklySummary, WeekBarChart } from '@features/weekly-summary';
-import { AppText, Button, Card, ErrorState, Screen, Skeleton, makeStyles } from '@shared/ui';
+import { AppText, Button, Card, ErrorState, ProgressBar, Screen, Skeleton, makeStyles } from '@shared/ui';
 import { Pressable, ScrollView, View } from 'react-native';
 
 export function WeeklySummaryScreen() {
@@ -67,6 +67,29 @@ export function WeeklySummaryScreen() {
               : 'Süre tutmadığın için çubuklar tahmini süreyi gösteriyor.'}
           </AppText>
         </Card>
+
+        {vm.courses.length > 0 ? (
+          <Card style={styles.card}>
+            <AppText variant="subtitle">Derslere göre süre</AppText>
+            {vm.courses.map((course) => (
+              <View key={course.id} style={styles.courseRow}>
+                <View style={styles.row}>
+                  <AppText style={styles.flex} numberOfLines={1}>
+                    {course.label}
+                  </AppText>
+                  <AppText variant="label">{course.minutesLabel}</AppText>
+                </View>
+                <ProgressBar value={course.ratio} height={4} accessibilityLabel={`${course.label} ${course.minutesLabel}`} />
+                <AppText variant="caption" tone="muted" numberOfLines={2}>
+                  {course.topicsLabel}
+                </AppText>
+              </View>
+            ))}
+            <AppText variant="caption" tone="muted">
+              Görev zamanlayıcısı ve Focus Timer’la ölçülen süre birlikte.
+            </AppText>
+          </Card>
+        ) : null}
 
         {vm.groups.length > 0 ? (
           <Card style={styles.card}>
@@ -153,5 +176,6 @@ const useStyles = makeStyles(({ spacing }) => ({
   statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   stat: { minWidth: '40%', gap: spacing.xxs },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  courseRow: { gap: spacing.xxs },
   flex: { flex: 1 },
 }));

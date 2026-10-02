@@ -2,6 +2,7 @@ import { useCourse, useDeleteCourse } from '@entities/course';
 import { useExamEditor } from '@features/exam-edit';
 import { useTermWeek } from '@features/term-week';
 import { EXAM_KIND_LABEL, useCourseExams } from '@entities/exam';
+import { entriesBetween, summarizeByTopic, totalMinutes, useCourseStudyTime } from '@entities/study-time';
 import {
   isWeak,
   MASTERY_LABEL,
@@ -11,17 +12,26 @@ import {
   type Topic,
   type TopicRowModel,
 } from '@entities/topic';
-import { diffInDays, formatShortDate, useToday } from '@shared/lib/date';
+import { diffInDays, formatMinutes, formatShortDate, useToday, weekStartOf } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { showToast } from '@shared/lib/toast';
 import { useRouter } from 'expo-router';
 import { useMemo } from 'react';
 
-const toRowModel = (topic: Topic, today: string, currentWeek: number | null): TopicRowModel => {
+/** Topics listed under "Çalışma süresi"; the rest show their time in the topic list. */
+const STUDY_ROWS = 6;
+
+const toRowModel = (
+  topic: Topic,
+  today: string,
+  currentWeek: number | null,
+  studiedMinutes: number,
+): TopicRowModel => {
   const mastery = masteryOf(topic);
   const stats: string[] = [];
   if (topic.solvedProblems > 0) stats.push(`${topic.solvedProblems} problem`);
   if (topic.openTasks > 0) stats.push(`${topic.openTasks} açık görev`);
+  if (studiedMinutes > 0) stats.push(`${formatMinutes(studiedMinutes)} çalışıldı`);
 
   const reviewLabel =
     topic.nextReviewOn === null
@@ -56,6 +66,8 @@ export function useCourseDetailScreen(courseId: string) {
   const courseQuery = useCourse(courseId);
   const topicsQuery = useCourseTopics(courseId);
   const examsQuery = useCourseExams(courseId);
+  // Not in `queries`: the course is usable without it, so its failure only hides the section.
+  const studyQuery = useCourseStudyTime(courseId);
   const advancedMaterial = useSetAdvancedMaterial(courseId);
   const deleteCourse = useDeleteCourse();
   const examEditor = useExamEditor(courseId);
@@ -70,6 +82,11 @@ export function useCourseDetailScreen(courseId: string) {
     if (!course) return null;
     const topics = topicsQuery.data ?? [];
     const exams = examsQuery.data ?? [];
+    const studyEntries = studyQuery.data ?? [];
+    const studyRows = summarizeByTopic(studyEntries);
+    const minutesByTopic = new Map(studyRows.map((row) => [row.topicId, row.minutes]));
+    const longest = Math.max(1, ...studyRows.map((row) => row.minutes));
+    const rowModel = (t: Topic) => toRowModel(t, today, currentWeek, minutesByTopic.get(t.id) ?? 0);
 
     return {
       title: course.name,
@@ -79,8 +96,25 @@ export function useCourseDetailScreen(courseId: string) {
         { label: 'açık görev', value: topics.reduce((sum, t) => sum + t.openTasks, 0) },
         { label: 'çözülen problem', value: topics.reduce((sum, t) => sum + t.solvedProblems, 0) },
       ],
-      weakTopics: topics.filter(isWeak).map((t) => toRowModel(t, today, currentWeek)),
-      topics: topics.map((t) => toRowModel(t, today, currentWeek)),
+      weakTopics: topics.filter(isWeak).map(rowModel),
+      topics: topics.map(rowModel),
+      study: studyQuery.isError
+        ? null
+        : {
+            isLoading: studyQuery.isPending,
+            totalLabel: formatMinutes(totalMinutes(studyEntries)),
+            weekLabel: formatMinutes(totalMinutes(entriesBetween(studyEntries, weekStartOf(today), today))),
+            hasAny: studyEntries.length > 0,
+            rows: studyRows.slice(0, STUDY_ROWS).map((row) => ({
+              key: row.topicId ?? 'no-topic',
+              topicId: row.topicId,
+              title: row.title,
+              minutesLabel: formatMinutes(row.minutes),
+              ratio: row.minutes / longest,
+              meta: `${row.sessions} oturum · son ${formatShortDate(row.lastStudiedOn)}`,
+            })),
+            hiddenCount: Math.max(0, studyRows.length - STUDY_ROWS),
+          },
       exams: exams.map((exam) => ({
         id: exam.id,
         title: exam.title,
@@ -90,7 +124,16 @@ export function useCourseDetailScreen(courseId: string) {
         isPast: exam.examDate < today,
       })),
     };
-  }, [courseQuery.data, topicsQuery.data, examsQuery.data, today, currentWeek]);
+  }, [
+    courseQuery.data,
+    topicsQuery.data,
+    examsQuery.data,
+    studyQuery.data,
+    studyQuery.isError,
+    studyQuery.isPending,
+    today,
+    currentWeek,
+  ]);
 
   return {
     isLoading: queries.some((q) => q.isPending && q.data === undefined),

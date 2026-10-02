@@ -1,7 +1,7 @@
 import { TopicRow } from '@entities/topic';
 import { ExamForm } from '@features/exam-edit';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { AppText, Button, Card, ErrorState, Screen, Skeleton, makeStyles, useTheme } from '@shared/ui';
+import { AppText, Button, Card, ErrorState, ProgressBar, Screen, Skeleton, makeStyles, useTheme } from '@shared/ui';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useCourseDetailScreen } from '../model/useCourseDetailScreen';
@@ -68,6 +68,55 @@ export function CourseDetailScreen() {
         </View>
 
         <TermWeekCard term={term} />
+
+        {view.study ? (
+          <Card style={styles.studyCard}>
+            <View style={styles.studyHeader}>
+              <AppText variant="subtitle">Çalışma süresi</AppText>
+              {view.study.hasAny ? (
+                <AppText variant="caption" tone="muted">
+                  toplam {view.study.totalLabel} · bu hafta {view.study.weekLabel}
+                </AppText>
+              ) : null}
+            </View>
+            {view.study.isLoading ? (
+              <Skeleton height={40} radius={10} />
+            ) : !view.study.hasAny ? (
+              <AppText variant="caption" tone="muted">
+                Henüz süre ölçülmedi. Görev ekranındaki zamanlayıcıyı ya da Focus Timer’ı (Ayarlar → Focus Timer)
+                kullandığında konu konu burada görünür.
+              </AppText>
+            ) : (
+              <>
+                {view.study.rows.map((row) => (
+                  <Pressable
+                    key={row.key}
+                    accessibilityRole={row.topicId ? 'button' : undefined}
+                    disabled={!row.topicId}
+                    onPress={() => (row.topicId ? onOpenTopic(row.topicId) : undefined)}
+                    style={({ pressed }) => [styles.studyRow, pressed && styles.pressed]}
+                  >
+                    <View style={styles.studyLine}>
+                      <AppText style={styles.flex} numberOfLines={1} tone={row.topicId ? 'default' : 'muted'}>
+                        {row.title}
+                      </AppText>
+                      <AppText variant="label">{row.minutesLabel}</AppText>
+                    </View>
+                    <ProgressBar value={row.ratio} height={4} accessibilityLabel={`${row.title} ${row.minutesLabel}`} />
+                    <AppText variant="caption" tone="muted">
+                      {row.meta}
+                    </AppText>
+                  </Pressable>
+                ))}
+                {view.study.hiddenCount > 0 ? (
+                  <AppText variant="caption" tone="muted">
+                    +{view.study.hiddenCount} konu daha; süreleri aşağıdaki listede.
+                  </AppText>
+                ) : null}
+              </>
+            )}
+          </Card>
+        ) : null}
 
         <View style={styles.section}>
           <AppText variant="label" tone="muted">
@@ -175,4 +224,8 @@ const useStyles = makeStyles(({ spacing }) => ({
   examRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md },
   flex: { flex: 1, gap: spacing.xxs },
   pressed: { opacity: 0.5 },
+  studyCard: { gap: spacing.sm },
+  studyHeader: { gap: spacing.xxs },
+  studyRow: { gap: spacing.xxs, paddingVertical: spacing.xxs },
+  studyLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 }));

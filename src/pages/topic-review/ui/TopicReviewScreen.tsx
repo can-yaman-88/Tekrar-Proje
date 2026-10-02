@@ -95,6 +95,7 @@ export function TopicReviewScreen() {
             <Fact label="Son çalışma" value={status.lastLabel} />
             <Fact label="Son güven puanı" value={status.confidenceLabel} />
             <Fact label="Son isabet" value={status.accuracyLabel} />
+            <Fact label="Çalışma süresi" value={vm.studyLabel} />
             <View style={styles.stats}>
               {status.stats.map((stat) => (
                 <View key={stat.label} style={styles.stat}>

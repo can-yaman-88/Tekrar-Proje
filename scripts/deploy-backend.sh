@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-FUNCTIONS=(daily-checkin ingest-syllabus generate-weekly-plan llm-models)
+FUNCTIONS=(daily-checkin ingest-syllabus generate-weekly-plan llm-models focus-timer)
 FUNCTION_ENV="supabase/functions/.env"
 
 echo "→ Şema (migrations)"

@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(154);
+select plan(166);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -1325,6 +1325,65 @@ select is(
   'B sees only their own files'
 );
 reset role;
+
+-- ---------------------------------------------------------------------------
+-- Focus Timer: pairings stay server-side, sessions are per student, and a
+-- topic can only carry time for its own course.
+-- ---------------------------------------------------------------------------
+insert into public.focus_sessions (user_id, client_id, course_id, topic_id, kind, started_at, ended_at, minutes) values
+  ('aaaaaaaa-0000-4000-8000-000000000001', '5a000000-0000-4000-8000-0000000000a1',
+   'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a',
+   'timer', now() - interval '50 minutes', now(), 50);
+
+select throws_ok(
+  $$insert into public.focus_sessions (user_id, client_id, course_id, topic_id, kind, started_at, ended_at, minutes) values
+    ('bbbbbbbb-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-0000000000b9',
+     'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a',
+     'timer', now() - interval '5 minutes', now(), 5)$$,
+  '23503',
+  null,
+  'a focus session cannot borrow another student''s course and topic'
+);
+
+set local role anon;
+select throws_ok('select count(*) from public.focus_sessions', '42501', null, 'anon cannot read focus sessions');
+select throws_ok('select public.issue_focus_timer_link()', '42501', null, 'anon cannot pair a timer');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select is((select count(*)::int from public.focus_sessions), 0, 'B sees none of A''s focus sessions');
+select throws_ok(
+  $$insert into public.focus_sessions (user_id, client_id, course_id, kind, started_at, ended_at, minutes) values
+    ('bbbbbbbb-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-0000000000b1',
+     'c0000000-0000-4000-8000-00000000000b', 'timer', now() - interval '5 minutes', now(), 5)$$,
+  '42501',
+  null,
+  'the app cannot write focus sessions directly (only the timer, through the function)'
+);
+select throws_ok('select count(*) from public.focus_timer_links', '42501', null, 'pairing hashes never reach the app');
+select is((select count(*)::int from public.focus_timer_link_status()), 0, 'B starts with no timer');
+select ok(
+  (select (public.issue_focus_timer_link() ->> 'token') ~ '^[0-9a-f]{64}$'),
+  'pairing hands out a 64-character token'
+);
+select is((select count(*)::int from public.focus_timer_link_status()), 1, 'B now has a timer');
+select lives_ok('select public.revoke_focus_timer_link()', 'B can disconnect the timer');
+select is((select count(*)::int from public.focus_timer_link_status()), 0, 'a disconnected timer is gone');
+reset role;
+
+-- Topic of another course of the same student: the trigger refuses it.
+insert into public.courses (id, user_id, name) values
+  ('c0000000-0000-4000-8000-0000000000a2', 'aaaaaaaa-0000-4000-8000-000000000001', 'A ikinci ders');
+select throws_ok(
+  $$insert into public.focus_sessions (user_id, client_id, course_id, topic_id, kind, started_at, ended_at, minutes) values
+    ('aaaaaaaa-0000-4000-8000-000000000001', '5a000000-0000-4000-8000-0000000000a2',
+     'c0000000-0000-4000-8000-0000000000a2', 'd0000000-0000-4000-8000-00000000000a',
+     'timer', now() - interval '5 minutes', now(), 5)$$,
+  '23514',
+  null,
+  'time cannot be filed under a topic of a different course'
+);
 
 select * from finish();
 rollback;

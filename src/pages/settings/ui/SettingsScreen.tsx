@@ -3,6 +3,7 @@ import { useProfile, useSetAutoWeeklyPlan } from '@entities/profile';
 import { selectUserEmail, useSessionStore } from '@entities/session';
 import { useSignOut } from '@features/auth';
 import { CapacityCard, useLearnedCapacity } from '@features/capacity';
+import { FocusTimerCard, useFocusTimerLink } from '@features/focus-timer-link';
 import { WeeklyPlanCard } from '@features/weekly-plan';
 import { LlmApiKeyCard, useLlmApiKey } from '@features/llm-key';
 import { LlmModelCard, useLlmModelSettings } from '@features/llm-model';
@@ -34,6 +35,7 @@ export function SettingsScreen() {
   const llmModel = useLlmModelSettings();
   const apiKey = useLlmApiKey();
   const capacity = useLearnedCapacity();
+  const focusTimer = useFocusTimerLink();
   const profile = useProfile();
   const autoWeeklyPlan = useSetAutoWeeklyPlan();
   const signOut = useSignOut();
@@ -83,6 +85,8 @@ export function SettingsScreen() {
           </AppText>
           <Button label="Derslere git" variant="secondary" onPress={() => router.push('/courses')} />
         </Card>
+
+        <FocusTimerCard link={focusTimer} />
 
         <ReminderSettingsCard reminders={reminders} />
 

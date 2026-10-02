@@ -18,3 +18,8 @@ verify_jwt = true
 
 [functions.llm-models]
 verify_jwt = true
+
+# Called by the Focus Timer app, which has no Supabase session: the function
+# checks its own pairing token (x-timer-token) instead.
+[functions.focus-timer]
+verify_jwt = false

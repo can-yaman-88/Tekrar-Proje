@@ -1,3 +1,4 @@
+import { totalMinutes, useTopicStudyTime } from '@entities/study-time';
 import { isOpen, TASK_STATUS_LABEL, TASK_TYPE_LABEL, useTopicTasks, type Task } from '@entities/task';
 import {
   accuracyLabel,
@@ -17,7 +18,14 @@ import {
 import { mistakeChip, useTopicMistakeHistory, type TopicMistake } from '@entities/topic-mistake';
 import { useMistakeActions, type MistakeEntryModel } from '@features/mistake-book';
 import { useLogReview } from '@features/review-cycle';
-import { formatLongDate, formatRelativeDay, formatShortDate, localDateOf, useToday } from '@shared/lib/date';
+import {
+  formatLongDate,
+  formatMinutes,
+  formatRelativeDay,
+  formatShortDate,
+  localDateOf,
+  useToday,
+} from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -122,6 +130,7 @@ export function useTopicReviewScreen(topicId: string) {
   const reviewsQuery = useTopicReviews(topicId);
   const tasksQuery = useTopicTasks(topicId);
   const mistakesQuery = useTopicMistakeHistory(topicId);
+  const studyQuery = useTopicStudyTime(topicId);
   const logReview = useLogReview();
   const mistakeActions = useMistakeActions();
   const [isRating, setRating] = useState(false);
@@ -173,14 +182,28 @@ export function useTopicReviewScreen(topicId: string) {
   const { refetch: refetchReviews } = reviewsQuery;
   const { refetch: refetchTasks } = tasksQuery;
   const { refetch: refetchMistakes } = mistakesQuery;
+  const { refetch: refetchStudy } = studyQuery;
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refetchTopic(), refetchReviews(), refetchTasks(), refetchMistakes()]);
+      await Promise.all([refetchTopic(), refetchReviews(), refetchTasks(), refetchMistakes(), refetchStudy()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetchMistakes, refetchReviews, refetchTasks, refetchTopic]);
+  }, [refetchMistakes, refetchReviews, refetchStudy, refetchTasks, refetchTopic]);
+
+  // Both clocks: the task stopwatch and Focus Timer.
+  const studyLabel = useMemo(() => {
+    const entries = studyQuery.data ?? [];
+    if (entries.length === 0) return studyQuery.isPending ? '…' : 'Ölçülmedi';
+    const fromTimer = entries.filter((entry) => entry.source === 'timer').length;
+    const latest = entries.reduce((max, entry) => (entry.startedAt > max ? entry.startedAt : max), '');
+    return [
+      formatMinutes(totalMinutes(entries)),
+      fromTimer > 0 ? `${entries.length} oturum, ${fromTimer} tanesi Focus Timer’dan` : `${entries.length} oturum`,
+      `son ${formatShortDate(localDateOf(latest))}`,
+    ].join(' · ');
+  }, [studyQuery.data, studyQuery.isPending]);
 
   const { mutate: logMutate } = logReview;
   const mistakes = mistakesQuery.data ?? [];
@@ -200,6 +223,7 @@ export function useTopicReviewScreen(topicId: string) {
         }
       : null,
     status,
+    studyLabel,
     history: events.map(historyRow),
     openTasks: tasks.filter(isOpen).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).map((t) => taskRow(t, today)),
     doneTasks: tasks

@@ -286,6 +286,35 @@ başlatırsan öncekini kapatır.
 - **Tahmin–gerçek karşılaştırmasına.** Görev kartı "Tahmin 25 dk, gerçek 38 dk" der; haftalık
   özet aynı karşılaştırmayı görev türü bazında gösterir.
 
+## Focus Timer bağlantısı (Android)
+
+Ayrı bir Android uygulaması olan Focus Timer'da (`com.deepwork.focustimer`) başlamadan önce
+ders ve istersen konu seçilir. Her odak süresi Tekrar'a gelir:
+
+- **Ders ekranı** → "Çalışma süresi": toplam, bu hafta ve konu konu dağılım. Konu seçilmeden
+  çalışılan süre "Konu seçilmeden" satırında durur.
+- **Konu ekranı** → "Çalışma süresi" satırı.
+- **Haftalık özet** → "Derslere göre süre" kartı; Focus Timer dakikaları ölçülen süreye de
+  katılır.
+
+İki saatin süresi birlikte gösterilir (görev zamanlayıcısı + Focus Timer), ama Focus Timer
+süresi **kapasite ölçümüne ve tahmin–gerçek karşılaştırmasına girmez**: göreve değil derse
+bağlı olduğu için hangi işin ne kadar sürdüğünü söylemez. Bu yüzden ayrı tabloda tutulur
+(`focus_sessions`).
+
+**Bağlama:** Ayarlar → Focus Timer → "Focus Timer'ı bağla". Veritabanı rastgele bir anahtar
+üretir (yalnızca SHA-256'sı saklanır), Tekrar onu açık (explicit) bir intent'le doğrudan Focus
+Timer'ın onay ekranına verir; Focus Timer da yalnızca `com.tekrar.app` paketinden gelen isteği
+kabul eder. Anahtar yalnızca `focus-timer` Edge Function'ını çağırabilir: ders–konu adlarını
+okur, çalışma süresi yazar. Bu fonksiyon Supabase oturumu beklemez (`verify_jwt = false`),
+`x-timer-token` başlığındaki anahtarı kendisi doğrular. Yeniden bağlamak, yeni anahtar ilk kez
+kullanıldığında eskisini geçersiz kılar; "Bağlantıyı kaldır" hepsini hemen keser.
+
+Focus Timer çevrimdışı çalışmaya devam eder: süreler önce telefona yazılır, internet olunca
+toplu gönderilir. Her sürenin telefondaki kimliği (`client_id`) olduğu için tekrar gönderim
+çift sayılmaz; telefonda düzeltilen ya da silinen süre Tekrar'da da düzelir/silinir. 4 saati
+aşan süre (açık unutulmuş kronometre) kullanıcı onaylayana kadar gönderilmez.
+
 ## Sınav modu
 
 Yaklaşan sınava dokununca (Görevler ekranındaki sınav kartı ya da ders sayfasındaki sınav

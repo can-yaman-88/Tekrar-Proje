@@ -1,14 +1,17 @@
 import { useCheckinHistory } from '@entities/daily-log';
 import { taskGroupOf, useWeekTasks } from '@entities/task';
+import { entriesBetween, summarizeByCourse, useStudyTimeSince } from '@entities/study-time';
 import { useMeasuredWork } from '@entities/task-session';
 import { useReviewRadar } from '@entities/topic';
-import { addDays, formatLongDate, formatShortDate, useToday, weekStartOf } from '@shared/lib/date';
+import { addDays, formatLongDate, formatMinutes, formatShortDate, useToday, weekStartOf } from '@shared/lib/date';
 import { describeError } from '@shared/lib/errors';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { buildWeekSummary, type SummaryTask } from '../domain/weekly-summary';
 
 const WEEKDAY_SHORT = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+/** Topics named under each course; the rest is in the course screen. */
+const TOPICS_PER_COURSE = 3;
 
 /**
  * The week in review. Composed from queries the app already runs, so opening
@@ -26,6 +29,8 @@ export function useWeeklySummary() {
   const sessionsQuery = useMeasuredWork(weekStart);
   const checkinsQuery = useCheckinHistory();
   const topicsQuery = useReviewRadar();
+  // Extra detail, not a pillar of the screen: if it fails, the week still shows without it.
+  const studyQuery = useStudyTimeSince(weekStart);
 
   const queries = [tasksQuery, sessionsQuery, checkinsQuery, topicsQuery];
   const failed = queries.find((query) => query.isError);
@@ -53,6 +58,7 @@ export function useWeeklySummary() {
         minutes: work.minutes,
         estimatedMinutes: work.estimatedMinutes,
       })),
+      timerSessions: (studyQuery.data ?? []).filter((entry) => entry.source === 'timer'),
       checkinDates: (checkinsQuery.data ?? [])
         .filter((record) => record.revertedAt === null)
         .map((record) => record.logDate),
@@ -65,14 +71,30 @@ export function useWeeklySummary() {
         failedTasks: topic.failedTasks,
       })),
     });
-  }, [checkinsQuery.data, sessionsQuery.data, tasksQuery.data, topicsQuery.data, weekStart]);
+  }, [checkinsQuery.data, sessionsQuery.data, studyQuery.data, tasksQuery.data, topicsQuery.data, weekStart]);
+
+  // Where the week's time went, from both clocks: the task stopwatch and Focus Timer.
+  const courses = useMemo(() => {
+    const rows = summarizeByCourse(entriesBetween(studyQuery.data ?? [], weekStart, weekEnd));
+    const longest = Math.max(1, ...rows.map((row) => row.minutes));
+    return rows.map((row) => ({
+      id: row.courseId,
+      label: row.label,
+      minutesLabel: formatMinutes(row.minutes),
+      ratio: row.minutes / longest,
+      topicsLabel: row.topics
+        .slice(0, TOPICS_PER_COURSE)
+        .map((topic) => `${topic.title} ${formatMinutes(topic.minutes)}`)
+        .join(' · '),
+    }));
+  }, [studyQuery.data, weekEnd, weekStart]);
 
   const maxMinutes = Math.max(60, ...summary.byDay.map((day) => day.minutes));
 
   return {
     isLoading: queries.some((query) => query.isPending && query.data === undefined),
     error: failed ? describeError(failed.error) : null,
-    retry: () => queries.forEach((query) => void query.refetch()),
+    retry: () => [...queries, studyQuery].forEach((query) => void query.refetch()),
     rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
     isCurrentWeek: offset === 0,
     onPreviousWeek: () => setOffset((current) => current - 1),
@@ -95,6 +117,7 @@ export function useWeeklySummary() {
       ratio: day.minutes / maxMinutes,
     })),
     groups: summary.byGroup.filter((group) => group.total > 0),
+    courses,
     calibration: summary.calibration.map((row) => ({
       ...row,
       /** Positive means the work takes longer than the planner budgets for. */

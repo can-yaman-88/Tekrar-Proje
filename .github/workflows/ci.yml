@@ -55,7 +55,7 @@ jobs:
         working-directory: supabase/functions
         run: |
           set -euo pipefail
-          for fn in daily-checkin generate-weekly-plan ingest-syllabus llm-models; do
+          for fn in daily-checkin generate-weekly-plan ingest-syllabus llm-models focus-timer; do
             echo "::group::$fn"
             (cd "$fn" && deno check index.ts && if ls *.test.ts >/dev/null 2>&1; then deno test --allow-all; fi)
             echo "::endgroup::"

@@ -141,4 +141,24 @@ describe('buildWeekSummary', () => {
     });
     expect(manyCheckins.headline).toContain('kapasiteyi düşürmek');
   });
+
+  it('Focus Timer süresini ölçülen süreye katar ama kalibrasyona sokmaz', () => {
+    const summary = buildWeekSummary({
+      weekStart: WEEK_START,
+      tasks: [task({ id: 'a' })],
+      sessions: [session({ taskId: 'a', minutes: 40 }), session({ taskId: 'a', minutes: 20 })],
+      timerSessions: [
+        { startedAt: '2026-09-21T09:00:00Z', minutes: 50 },
+        { startedAt: '2026-09-23T09:00:00Z', minutes: 25 },
+        { startedAt: '2026-09-29T09:00:00Z', minutes: 90 },
+      ],
+      checkinDates: [],
+      topics: [],
+    });
+
+    expect(summary.measuredMinutes).toBe(135);
+    expect(summary.byDay[0]?.minutes).toBe(110);
+    expect(summary.byDay[2]?.minutes).toBe(25);
+    expect(summary.calibration[0]?.actual).toBe(30);
+  });
 });

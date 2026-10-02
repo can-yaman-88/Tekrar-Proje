@@ -8,6 +8,8 @@ export const RATE_LIMITS = {
   weekly_plan: { limit: 10, windowSeconds: 3600, message: 'Haftalık planı bir saatte en fazla 10 kez oluşturabilirsin.' },
   llm_models: { limit: 30, windowSeconds: 3600, message: 'Model listesi çok sık istendi. Biraz sonra tekrar dene.' },
   llm_test: { limit: 10, windowSeconds: 3600, message: 'Bir saatte en fazla 10 model denemesi yapılabilir.' },
+  // The timer talks after every focus stretch and on every launch; a loop would be hundreds.
+  focus_timer: { limit: 240, windowSeconds: 3600, message: 'Focus Timer çok sık bağlandı. Biraz sonra tekrar denenecek.' },
 } as const;
 
 export type RateLimitBucket = keyof typeof RATE_LIMITS;

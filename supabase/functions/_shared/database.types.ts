@@ -783,6 +783,105 @@ export type Database = {
           },
         ]
       }
+      focus_sessions: {
+        Row: {
+          client_id: string
+          course_id: string
+          created_at: string
+          ended_at: string
+          id: string
+          kind: string
+          minutes: number
+          started_at: string
+          topic_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          course_id: string
+          created_at?: string
+          ended_at: string
+          id?: string
+          kind: string
+          minutes: number
+          started_at: string
+          topic_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          course_id?: string
+          created_at?: string
+          ended_at?: string
+          id?: string
+          kind?: string
+          minutes?: number
+          started_at?: string
+          topic_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "focus_sessions_course_fk"
+            columns: ["course_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "focus_sessions_topic_fk"
+            columns: ["topic_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "focus_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      focus_timer_links: {
+        Row: {
+          created_at: string
+          id: string
+          last_used_at: string | null
+          revoked_at: string | null
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token_hash: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "focus_timer_links_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           auto_weekly_plan: boolean
@@ -1621,6 +1720,13 @@ export type Database = {
         Args: { p_kind: string; p_location: string; p_source: string }
         Returns: string
       }
+      focus_timer_link_status: {
+        Args: never
+        Returns: {
+          last_used_at: string
+          linked_at: string
+        }[]
+      }
       group_learning_pair: {
         Args: { p_child_ids: string[]; p_due_date: string; p_title: string }
         Returns: string
@@ -1638,6 +1744,7 @@ export type Database = {
       is_app_admin: { Args: never; Returns: boolean }
       is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
       is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
+      issue_focus_timer_link: { Args: never; Returns: Json }
       kick_off_weekly_plans: { Args: never; Returns: number }
       llm_key_secret_name: { Args: { p_user_id: string }; Returns: string }
       log_topic_review: {
@@ -1677,6 +1784,10 @@ export type Database = {
         Returns: boolean
       }
       revert_daily_checkin: { Args: { p_daily_log_id: string }; Returns: Json }
+      revoke_focus_timer_link: {
+        Args: { p_link_id?: string }
+        Returns: undefined
+      }
       send_error_digest: { Args: never; Returns: number }
       send_review_reminders: { Args: never; Returns: number }
       set_llm_api_key: { Args: { p_key: string }; Returns: Json }
