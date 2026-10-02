@@ -6,7 +6,10 @@ export const taskKeys = {
   detail: (taskId: string) => [...taskKeys.all, 'detail', taskId] as const,
   subtasks: (taskId: string) => [...taskKeys.all, 'subtasks', taskId] as const,
   backlog: (before: IsoDate) => [...taskKeys.all, 'backlog', before] as const,
-  history: () => [...taskKeys.all, 'history'] as const,
+  // Paged (an infinite query). Not 'history': before paging that key held a
+  // plain array, and a cache persisted by an older install would be read as
+  // pages and crash the screen.
+  history: () => [...taskKeys.all, 'history-pages'] as const,
   historyCounts: () => [...taskKeys.all, 'history-counts'] as const,
   week: (weekStart: IsoDate) => [...taskKeys.all, 'week', weekStart] as const,
   forTopic: (topicId: string) => [...taskKeys.all, 'topic', topicId] as const,
