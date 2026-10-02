@@ -12,6 +12,7 @@ const upsert = (clientId: string, patch: Partial<FocusSessionUpsert> = {}): Focu
   clientId,
   courseId: COURSE,
   topicId: TOPIC,
+  taskId: null,
   kind: 'timer',
   startedAt: '2026-10-02T09:00:00+03:00',
   endedAt: '2026-10-02T09:50:00+03:00',
@@ -23,7 +24,7 @@ const courses = new Set([COURSE, OTHER_COURSE]);
 const topics = new Map([[TOPIC, COURSE]]);
 
 Deno.test('a stretch on a known course and topic is stored as sent, in UTC', () => {
-  const result = sortUpserts(USER, [upsert('11111111-0000-4000-8000-000000000001')], courses, topics, NOW);
+  const result = sortUpserts(USER, [upsert('11111111-0000-4000-8000-000000000001')], courses, topics, new Map(), NOW);
   assertEquals(result.rejected, []);
   assertEquals(result.topicDropped, []);
   assertEquals(result.rows, [
@@ -32,6 +33,7 @@ Deno.test('a stretch on a known course and topic is stored as sent, in UTC', () 
       client_id: '11111111-0000-4000-8000-000000000001',
       course_id: COURSE,
       topic_id: TOPIC,
+      task_id: null,
       kind: 'timer',
       started_at: '2026-10-02T06:00:00.000Z',
       ended_at: '2026-10-02T06:50:00.000Z',
@@ -46,6 +48,7 @@ Deno.test('a deleted course refuses the stretch', () => {
     [upsert('11111111-0000-4000-8000-000000000002', { courseId: 'c0000000-0000-4000-8000-0000000000ff' })],
     courses,
     topics,
+    new Map(),
     NOW,
   );
   assertEquals(result.rows, []);
@@ -61,6 +64,7 @@ Deno.test('a topic that is gone or belongs elsewhere leaves the time with the co
     ],
     courses,
     topics,
+    new Map(),
     NOW,
   );
   assertEquals(result.rows.map((row) => row.topic_id), [null, null]);
@@ -76,6 +80,7 @@ Deno.test('impossible times are refused', () => {
     ],
     courses,
     topics,
+    new Map(),
     NOW,
   );
   assertEquals(result.rows, []);
@@ -91,10 +96,39 @@ Deno.test('the same stretch twice in one batch keeps the later version', () => {
     [upsert('11111111-0000-4000-8000-000000000007'), upsert('11111111-0000-4000-8000-000000000007', { minutes: 30 })],
     courses,
     topics,
+    new Map(),
     NOW,
   );
   assertEquals(result.rows.length, 1);
   assertEquals(result.rows[0]?.minutes, 30);
+});
+
+const TASK = 'e0000000-0000-4000-8000-00000000000a';
+const OTHER_TOPIC = 'd0000000-0000-4000-8000-00000000000b';
+
+Deno.test('a known task files the stretch under its own topic and course', () => {
+  const result = sortUpserts(
+    USER,
+    // The timer still had an old topic/course cached for it.
+    [upsert('11111111-0000-4000-8000-000000000008', { taskId: TASK, courseId: COURSE, topicId: TOPIC })],
+    courses,
+    topics,
+    new Map([[TASK, { topicId: OTHER_TOPIC, courseId: OTHER_COURSE }]]),
+    NOW,
+  );
+  assertEquals(result.rejected, []);
+  assertEquals(result.taskDropped, []);
+  assertEquals(result.topicDropped, []);
+  assertEquals(
+    [result.rows[0]?.task_id, result.rows[0]?.topic_id, result.rows[0]?.course_id],
+    [TASK, OTHER_TOPIC, OTHER_COURSE],
+  );
+});
+
+Deno.test('a deleted task leaves the time with the topic it was sent with', () => {
+  const result = sortUpserts(USER, [upsert('11111111-0000-4000-8000-000000000009', { taskId: TASK })], courses, topics, new Map(), NOW);
+  assertEquals(result.taskDropped, ['11111111-0000-4000-8000-000000000009']);
+  assertEquals([result.rows[0]?.task_id, result.rows[0]?.topic_id], [null, TOPIC]);
 });
 
 Deno.test('the token hash matches what Postgres stores', async () => {

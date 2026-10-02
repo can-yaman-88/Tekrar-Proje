@@ -3,7 +3,9 @@ export {
   elapsedMinutes,
   formatElapsed,
   MAX_SESSION_MINUTES,
+  sumMinutes,
   type MeasuredWork,
+  type SessionClock,
   type TaskSession,
 } from './domain/task-session';
 export {

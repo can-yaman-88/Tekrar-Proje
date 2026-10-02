@@ -1,5 +1,11 @@
 import type { TaskType } from '@contracts/enums.contract';
 
+/**
+ * Which clock measured a stretch: Tekrar's own stopwatch on the task screen,
+ * or the Focus Timer app with this task picked.
+ */
+export type SessionClock = 'stopwatch' | 'focus_timer';
+
 /** A stretch of real study time against one task. */
 export interface TaskSession {
   id: string;
@@ -7,6 +13,7 @@ export interface TaskSession {
   startedAt: string;
   endedAt: string | null;
   minutes: number | null;
+  clock: SessionClock;
 }
 
 /** A closed session together with the work it measured. */
@@ -36,3 +43,7 @@ export function formatElapsed(startedAt: string, now: Date = new Date()): string
   const pad = (value: number): string => String(value).padStart(2, '0');
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 }
+
+/** Minutes of the closed sessions in a list. */
+export const sumMinutes = (sessions: readonly TaskSession[]): number =>
+  sessions.reduce((sum, session) => sum + (session.minutes ?? 0), 0);

@@ -58,7 +58,8 @@ export function useWeeklySummary() {
         minutes: work.minutes,
         estimatedMinutes: work.estimatedMinutes,
       })),
-      timerSessions: (studyQuery.data ?? []).filter((entry) => entry.source === 'timer'),
+      // Timer time on a task already arrives with the measured work above.
+      timerSessions: (studyQuery.data ?? []).filter((entry) => entry.source === 'timer' && entry.taskId === null),
       checkinDates: (checkinsQuery.data ?? [])
         .filter((record) => record.revertedAt === null)
         .map((record) => record.logDate),

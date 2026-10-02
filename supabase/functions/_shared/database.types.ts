@@ -793,6 +793,7 @@ export type Database = {
           kind: string
           minutes: number
           started_at: string
+          task_id: string | null
           topic_id: string | null
           updated_at: string
           user_id: string
@@ -806,6 +807,7 @@ export type Database = {
           kind: string
           minutes: number
           started_at: string
+          task_id?: string | null
           topic_id?: string | null
           updated_at?: string
           user_id: string
@@ -819,6 +821,7 @@ export type Database = {
           kind?: string
           minutes?: number
           started_at?: string
+          task_id?: string | null
           topic_id?: string | null
           updated_at?: string
           user_id?: string
@@ -829,6 +832,13 @@ export type Database = {
             columns: ["course_id", "user_id"]
             isOneToOne: false
             referencedRelation: "courses"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "focus_sessions_task_fk"
+            columns: ["task_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
             referencedColumns: ["id", "user_id"]
           },
           {

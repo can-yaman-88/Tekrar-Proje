@@ -52,7 +52,7 @@ export function useTaskDetail(taskId: string) {
       : null,
     // Only homework with days still ahead of it has anything to distribute.
     showsAllocation: task !== null && isDeadlineWork(task, todayLocal()),
-    timer: useTaskTimer(taskId, task?.estimatedMinutes ?? null),
+    timer: useTaskTimer(task),
     noteForm: useNoteForm(taskId),
     notes: notesQuery.data ?? [],
     notesLoading: notesQuery.isPending,

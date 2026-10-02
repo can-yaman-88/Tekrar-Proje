@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { taskSessionRepository } from '../data/task-session.repository';
+import type { TaskSession } from '../domain/task-session';
 
 export const taskSessionKeys = {
   all: ['task-sessions'] as const,
   running: ['task-sessions', 'running'] as const,
-  forTask: (taskId: string) => ['task-sessions', 'task', taskId] as const,
+  /** A task, or a group with its steps: one list across both clocks. */
+  forTasks: (taskIds: readonly string[]) => ['task-sessions', 'tasks', ...taskIds] as const,
   since: (from: string) => ['task-sessions', 'since', from] as const,
   measured: (from: string) => ['task-sessions', 'measured', from] as const,
 };
@@ -13,6 +15,7 @@ export const taskSessionMutationKeys = {
   start: [...taskSessionKeys.all, 'start'] as const,
   stop: [...taskSessionKeys.all, 'stop'] as const,
   log: [...taskSessionKeys.all, 'log'] as const,
+  remove: [...taskSessionKeys.all, 'remove'] as const,
 };
 
 export function useRunningSession() {
@@ -22,10 +25,12 @@ export function useRunningSession() {
   });
 }
 
-export function useTaskSessions(taskId: string) {
+/** Every stretch on these tasks, newest first, from both clocks. */
+export function useTaskSessions(taskIds: readonly string[]) {
   return useQuery({
-    queryKey: taskSessionKeys.forTask(taskId),
-    queryFn: () => taskSessionRepository.listForTask(taskId),
+    queryKey: taskSessionKeys.forTasks(taskIds),
+    queryFn: () => taskSessionRepository.listForTasks(taskIds),
+    enabled: taskIds.length > 0,
   });
 }
 
@@ -79,7 +84,8 @@ export function useLogManualSession() {
 }
 
 export function useDeleteSession() {
-  return useSessionMutation(taskSessionMutationKeys.log, ({ sessionId }: { sessionId: string }) =>
-    taskSessionRepository.remove(sessionId),
+  return useSessionMutation(
+    taskSessionMutationKeys.remove,
+    ({ session }: { session: Pick<TaskSession, 'id' | 'clock'> }) => taskSessionRepository.remove(session),
   );
 }

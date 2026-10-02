@@ -10,6 +10,12 @@ export const FocusSessionUpsertSchema = z.object({
   clientId: z.uuid(),
   courseId: z.uuid(),
   topicId: z.uuid().nullable(),
+  /**
+   * The task the time went into. When set, the server files the stretch under
+   * the task's own topic and course, whatever the timer sent for those.
+   * Optional so a timer from before tasks still syncs.
+   */
+  taskId: z.uuid().nullable().default(null),
   kind: z.enum(['timer', 'stopwatch', 'manual']),
   startedAt: z.iso.datetime({ offset: true }),
   endedAt: z.iso.datetime({ offset: true }),
@@ -37,6 +43,23 @@ export interface FocusTimerSubjectsResponse {
     color: string | null;
     topics: { id: string; title: string; week: number | null }[];
   }[];
+  /**
+   * Open work the time can be filed under: single tasks and the steps of group
+   * tasks (a group is only a container — its steps carry the minutes). Due
+   * from a few weeks back (still open = overdue) to a few weeks ahead.
+   */
+  tasks: {
+    id: string;
+    topicId: string;
+    title: string;
+    /** The group task a step belongs to, for context ("Kafes sistemler öğrenme › Feynman"). */
+    parentTitle: string | null;
+    type: string;
+    dueDate: string;
+    estimatedMinutes: number | null;
+    /** Minutes already measured on it, from both clocks. */
+    measuredMinutes: number;
+  }[];
 }
 
 /** Why a stretch was refused; the timer stops retrying it. */
@@ -47,6 +70,8 @@ export interface FocusTimerSyncResponse {
   accepted: string[];
   /** The topic was gone, so the time went to the course alone. */
   topicDropped: string[];
+  /** The task was gone, so the time went to its topic (or course) instead. */
+  taskDropped: string[];
   rejected: { clientId: string; reason: FocusSessionRejection }[];
   deleted: string[];
 }

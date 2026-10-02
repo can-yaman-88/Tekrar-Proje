@@ -278,7 +278,7 @@ export class CheckinRepository {
    */
   async loadCapacity(logDate: IsoDate): Promise<CapacityContext> {
     const historyStart = addDays(logDate, -LOOKBACK_WEEKS * 7);
-    const [finishedResult, sessionsResult, profileResult] = await Promise.all([
+    const [finishedResult, sessionsResult, timerResult, profileResult] = await Promise.all([
       this.user
         .from('tasks')
         .select('id, parent_task_id, completed_at, estimated_minutes')
@@ -293,6 +293,13 @@ export class CheckinRepository {
         .gte('started_at', `${addDays(historyStart, -1)}T00:00:00Z`)
         .not('minutes', 'is', null)
         .limit(2000),
+      // Focus Timer stretches filed under a task count as measured work on it.
+      this.user
+        .from('focus_sessions')
+        .select('task_id, started_at, minutes')
+        .gte('started_at', `${addDays(historyStart, -1)}T00:00:00Z`)
+        .not('task_id', 'is', null)
+        .limit(2000),
       this.user
         .from('profiles')
         .select('blocked_weekdays, capacity_overrides, timezone')
@@ -302,6 +309,7 @@ export class CheckinRepository {
 
     if (finishedResult.error) throw dbError('load finished tasks', finishedResult.error);
     if (sessionsResult.error) throw dbError('load sessions', sessionsResult.error);
+    if (timerResult.error) throw dbError('load focus timer sessions', timerResult.error);
     if (profileResult.error) throw dbError('load profile', profileResult.error);
 
     const timeZone = profileResult.data?.timezone ?? 'UTC';
@@ -322,8 +330,8 @@ export class CheckinRepository {
               },
             ],
       ),
-      timed: sessionsResult.data.flatMap((session) =>
-        session.minutes === null
+      timed: [...sessionsResult.data, ...timerResult.data].flatMap((session) =>
+        session.minutes === null || session.task_id === null
           ? []
           : [{ taskId: session.task_id, startedOn: localDateIn(session.started_at, timeZone), minutes: session.minutes }],
       ),

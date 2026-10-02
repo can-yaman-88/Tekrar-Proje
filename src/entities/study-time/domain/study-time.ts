@@ -18,6 +18,8 @@ export interface StudyEntry {
   /** Null for timer time filed under the course alone. */
   topicId: string | null;
   topicTitle: string | null;
+  /** The task it was measured on; null for timer time filed under a topic or course. */
+  taskId: string | null;
 }
 
 export interface TopicStudyRow {

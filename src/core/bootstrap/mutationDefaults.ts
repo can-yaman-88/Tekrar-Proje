@@ -17,7 +17,7 @@ import {
 } from '@entities/profile';
 import { taskKeys, taskMutationKeys, taskRepository, type TaskPatch, type TaskStatus } from '@entities/task';
 import { taskNoteMutationKeys, taskNoteRepository } from '@entities/task-note';
-import { taskSessionMutationKeys, taskSessionRepository } from '@entities/task-session';
+import { taskSessionMutationKeys, taskSessionRepository, type TaskSession } from '@entities/task-session';
 import {
   runAddMistake,
   runDeleteMistake,
@@ -60,6 +60,9 @@ export interface LogSessionVariables {
   taskId: string;
   minutes: number;
 }
+export interface RemoveSessionVariables {
+  session: Pick<TaskSession, 'id' | 'clock'>;
+}
 
 /**
  * Offline queue: these mutations are registered by key so React Query can
@@ -98,6 +101,11 @@ export function registerMutationDefaults(): void {
   });
   queryClient.setMutationDefaults(taskSessionMutationKeys.log, {
     mutationFn: ({ taskId, minutes }: LogSessionVariables) => taskSessionRepository.logManual(taskId, minutes),
+  });
+  // Its own key: deletes used to share the manual-log key, so a delete queued
+  // offline would have been replayed as a log after a restart.
+  queryClient.setMutationDefaults(taskSessionMutationKeys.remove, {
+    mutationFn: ({ session }: RemoveSessionVariables) => taskSessionRepository.remove(session),
   });
 
   // The mistake book and the settings each drain as one ordered queue. A

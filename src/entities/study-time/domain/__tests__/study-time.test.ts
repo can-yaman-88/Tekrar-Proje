@@ -15,6 +15,7 @@ const entry = (over: Partial<StudyEntry> & { id: string }): StudyEntry => ({
   courseLabel: 'ME201',
   topicId: 'kafes',
   topicTitle: 'Kafes sistemler',
+  taskId: null,
   ...over,
 });
 

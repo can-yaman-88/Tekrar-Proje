@@ -297,10 +297,22 @@ ders ve istersen konu seçilir. Her odak süresi Tekrar'a gelir:
 - **Haftalık özet** → "Derslere göre süre" kartı; Focus Timer dakikaları ölçülen süreye de
   katılır.
 
-İki saatin süresi birlikte gösterilir (görev zamanlayıcısı + Focus Timer), ama Focus Timer
-süresi **kapasite ölçümüne ve tahmin–gerçek karşılaştırmasına girmez**: göreve değil derse
-bağlı olduğu için hangi işin ne kadar sürdüğünü söylemez. Bu yüzden ayrı tabloda tutulur
-(`focus_sessions`).
+Focus Timer'da **görev** de seçilebilir: "THIS WEEK" sekmesi haftanın bütün açık işlerini
+(gecikenler, bugün, haftanın kalan günleri, gelecek hafta, sonrası) listeler; "COURSES"
+sekmesinde ders → konu → o konunun açık görevleri. Grup görevin kendisi değil adımları
+listelenir — iş adımlarda, kabı da saymak aynı saati iki kez yazardı. Görev ekranındaki
+**"Focus Timer'da çalış"** düğmesi Timer'ı o görev seçili olarak açar.
+
+Görev seçilmiş süre o görevin ölçülmüş süresidir: görev kartında görünür, **kapasite
+ölçümüne ve tahmin–gerçek karşılaştırmasına girer** (istemcide `task-session` deposu,
+sunucuda planlayıcı ve değerlendirme `task_sessions` ile `focus_sessions.task_id`'yi birlikte
+okur). Görevsiz Focus Timer süresi ders/konu düzeyinde kalır ve bu hesaplara girmez. Kayıt
+her durumda `focus_sessions`'ta tutulur; görev seçiliyse sunucu dersi ve konuyu görevden alır.
+
+Görev ekranındaki **Çalışma süresi** kartı iki saati birlikte gösterir: toplam, tahmine göre
+ilerleme (açık görevde "kaldı/aştı", bitmişte "tahmin tuttu mu"), oturum listesi (kaynağıyla,
+silinebilir), çalışan sayaç için "Bitir ve kaydet" / "Vazgeç", hızlı ya da istenen dakikada elle
+ekleme; grup görevde adım adım süre.
 
 **Bağlama:** Ayarlar → Focus Timer → "Focus Timer'ı bağla". Veritabanı rastgele bir anahtar
 üretir (yalnızca SHA-256'sı saklanır), Tekrar onu açık (explicit) bir intent'le doğrudan Focus

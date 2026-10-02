@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(166);
+select plan(169);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -1371,6 +1371,33 @@ select is((select count(*)::int from public.focus_timer_link_status()), 1, 'B no
 select lives_ok('select public.revoke_focus_timer_link()', 'B can disconnect the timer');
 select is((select count(*)::int from public.focus_timer_link_status()), 0, 'a disconnected timer is gone');
 reset role;
+
+-- A stretch on a task: the task must be the student's own and match the topic.
+select lives_ok(
+  $$insert into public.focus_sessions (user_id, client_id, course_id, topic_id, task_id, kind, started_at, ended_at, minutes) values
+    ('aaaaaaaa-0000-4000-8000-000000000001', '5a000000-0000-4000-8000-0000000000a3',
+     'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a',
+     'e0000000-0000-4000-8000-00000000000a', 'timer', now() - interval '25 minutes', now(), 25)$$,
+  'time can be filed under the student''s own task'
+);
+select throws_ok(
+  $$insert into public.focus_sessions (user_id, client_id, course_id, topic_id, task_id, kind, started_at, ended_at, minutes) values
+    ('aaaaaaaa-0000-4000-8000-000000000001', '5a000000-0000-4000-8000-0000000000a4',
+     'c0000000-0000-4000-8000-00000000000a', null,
+     'e0000000-0000-4000-8000-00000000000a', 'timer', now() - interval '5 minutes', now(), 5)$$,
+  '23514',
+  null,
+  'a task''s time cannot be filed away from the task''s topic'
+);
+select throws_ok(
+  $$insert into public.focus_sessions (user_id, client_id, course_id, topic_id, task_id, kind, started_at, ended_at, minutes) values
+    ('bbbbbbbb-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-0000000000b4',
+     'c0000000-0000-4000-8000-00000000000b', 'd0000000-0000-4000-8000-00000000000b',
+     'e0000000-0000-4000-8000-00000000000a', 'timer', now() - interval '5 minutes', now(), 5)$$,
+  null,
+  null,
+  'nobody can file time under another student''s task'
+);
 
 -- Topic of another course of the same student: the trigger refuses it.
 insert into public.courses (id, user_id, name) values

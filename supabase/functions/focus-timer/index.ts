@@ -17,7 +17,8 @@ import { HttpError } from '../_shared/errors.ts';
 import { createHandler, jsonResponse, readJson } from '../_shared/http.ts';
 import { enforceRateLimit } from '../_shared/rate-limit.ts';
 import { createServiceClient, type TypedClient } from '../_shared/supabase.ts';
-import { hashToken, sortUpserts } from './sync.ts';
+import { addDaysUtc, buildTaskList, sumByTask, TASK_WINDOW } from './subjects.ts';
+import { hashToken, sortUpserts, type TaskPlace } from './sync.ts';
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 const UNLINKED_MESSAGE = 'Bu bağlantı artık geçerli değil. Tekrar → Ayarlar → Focus Timer’dan yeniden bağla.';
@@ -63,7 +64,13 @@ async function touchLink(service: TypedClient, link: Link): Promise<void> {
 }
 
 async function loadSubjects(service: TypedClient, userId: string): Promise<FocusTimerSubjectsResponse> {
-  const [courses, topics] = await Promise.all([
+  const today = new Date().toISOString().slice(0, 10);
+  const from = addDaysUtc(today, -TASK_WINDOW.pastDays);
+  const to = addDaysUtc(today, TASK_WINDOW.futureDays);
+  // Minutes on these tasks are recent; a quarter of a year covers them comfortably.
+  const measuredSince = `${addDaysUtc(from, -60)}T00:00:00Z`;
+
+  const [courses, topics, openTasks, steps, taskClock, timerClock] = await Promise.all([
     service.from('courses').select('id, name, code, color_hex').eq('user_id', userId).order('name'),
     service
       .from('topics')
@@ -71,9 +78,51 @@ async function loadSubjects(service: TypedClient, userId: string): Promise<Focus
       .eq('user_id', userId)
       .order('week_number', { ascending: true, nullsFirst: false })
       .order('position', { ascending: true }),
+    service
+      .from('tasks')
+      .select('id, topic_id, parent_task_id, title, type, due_date, estimated_minutes')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'in_progress'])
+      .gte('due_date', from)
+      .lte('due_date', to)
+      .order('due_date', { ascending: true })
+      .limit(500),
+    // Which tasks are containers: anything that is some step's parent.
+    service
+      .from('tasks')
+      .select('parent_task_id')
+      .eq('user_id', userId)
+      .not('parent_task_id', 'is', null)
+      .gte('due_date', addDaysUtc(from, -30)),
+    service
+      .from('task_sessions')
+      .select('task_id, minutes')
+      .eq('user_id', userId)
+      .gte('started_at', measuredSince)
+      .not('minutes', 'is', null),
+    service
+      .from('focus_sessions')
+      .select('task_id, minutes')
+      .eq('user_id', userId)
+      .gte('started_at', measuredSince)
+      .not('task_id', 'is', null),
   ]);
   if (courses.error) throw courses.error;
   if (topics.error) throw topics.error;
+  if (openTasks.error) throw openTasks.error;
+  if (steps.error) throw steps.error;
+  if (taskClock.error) throw taskClock.error;
+  if (timerClock.error) throw timerClock.error;
+
+  const containerIds = new Set(steps.data.flatMap((row) => (row.parent_task_id ? [row.parent_task_id] : [])));
+  const parentIds = [
+    ...new Set(openTasks.data.flatMap((task) => (task.parent_task_id ? [task.parent_task_id] : []))),
+  ];
+  const parents =
+    parentIds.length === 0
+      ? { data: [] as { id: string; title: string }[], error: null }
+      : await service.from('tasks').select('id, title').eq('user_id', userId).in('id', parentIds);
+  if (parents.error) throw parents.error;
 
   return {
     courses: courses.data.map((course) => ({
@@ -85,6 +134,12 @@ async function loadSubjects(service: TypedClient, userId: string): Promise<Focus
         .filter((topic) => topic.course_id === course.id)
         .map((topic) => ({ id: topic.id, title: topic.title, week: topic.week_number })),
     })),
+    tasks: buildTaskList(
+      openTasks.data,
+      containerIds,
+      new Map(parents.data.map((parent) => [parent.id, parent.title])),
+      sumByTask([...taskClock.data, ...timerClock.data]),
+    ),
   };
 }
 
@@ -103,24 +158,42 @@ async function sync(
     if (error) throw error;
   }
 
-  if (upserts.length === 0) return { accepted: [], topicDropped: [], rejected: [], deleted: [...deletes] };
+  if (upserts.length === 0) {
+    return { accepted: [], topicDropped: [], taskDropped: [], rejected: [], deleted: [...deletes] };
+  }
 
   const courseIds = [...new Set(upserts.map((upsert) => upsert.courseId))];
   const topicIds = [...new Set(upserts.flatMap((upsert) => (upsert.topicId ? [upsert.topicId] : [])))];
-  const [courses, topics] = await Promise.all([
+  const taskIds = [...new Set(upserts.flatMap((upsert) => (upsert.taskId ? [upsert.taskId] : [])))];
+  const [courses, topics, tasks] = await Promise.all([
     service.from('courses').select('id').eq('user_id', userId).in('id', courseIds),
     topicIds.length === 0
       ? Promise.resolve({ data: [] as { id: string; course_id: string }[], error: null })
       : service.from('topics').select('id, course_id').eq('user_id', userId).in('id', topicIds),
+    taskIds.length === 0
+      ? Promise.resolve({ data: [] as { id: string; topic_id: string; topic: { course_id: string } | null }[], error: null })
+      : service
+          .from('tasks')
+          .select('id, topic_id, topic:topics!tasks_topic_fk(course_id)')
+          .eq('user_id', userId)
+          .in('id', taskIds),
   ]);
   if (courses.error) throw courses.error;
   if (topics.error) throw topics.error;
+  if (tasks.error) throw tasks.error;
+
+  const taskPlaces = new Map<string, TaskPlace>(
+    tasks.data.flatMap((task) =>
+      task.topic ? [[task.id, { topicId: task.topic_id, courseId: task.topic.course_id }] as const] : [],
+    ),
+  );
 
   const sorted = sortUpserts(
     userId,
     upserts,
     new Set(courses.data.map((course) => course.id)),
     new Map(topics.data.map((topic) => [topic.id, topic.course_id])),
+    taskPlaces,
   );
 
   if (sorted.rows.length > 0) {
@@ -131,6 +204,7 @@ async function sync(
   return {
     accepted: sorted.rows.map((row) => row.client_id),
     topicDropped: sorted.topicDropped,
+    taskDropped: sorted.taskDropped,
     rejected: sorted.rejected,
     deleted: [...deletes],
   };

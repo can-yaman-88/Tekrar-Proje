@@ -6,15 +6,23 @@ export interface FocusSessionRow {
   client_id: string;
   course_id: string;
   topic_id: string | null;
+  task_id: string | null;
   kind: FocusSessionUpsert['kind'];
   started_at: string;
   ended_at: string;
   minutes: number;
 }
 
+/** Where a task lives: the stretch is filed under its topic and course. */
+export interface TaskPlace {
+  topicId: string;
+  courseId: string;
+}
+
 export interface SortedUpserts {
   rows: FocusSessionRow[];
   topicDropped: string[];
+  taskDropped: string[];
   rejected: { clientId: string; reason: FocusSessionRejection }[];
 }
 
@@ -25,6 +33,8 @@ const FUTURE_SLACK_MS = 10 * 60_000;
  * Decides what happens to each stretch the timer sent, against the courses and
  * topics the student really has:
  *
+ *  - a known task decides the topic and course, whatever the timer sent;
+ *  - the task is gone → the time stays with the topic/course the timer sent;
  *  - the course is gone (deleted in Tekrar) → refused, the timer stops retrying;
  *  - the topic is gone or belongs to another course → kept under the course alone;
  *  - the times are impossible → refused.
@@ -36,6 +46,7 @@ export function sortUpserts(
   upserts: readonly FocusSessionUpsert[],
   courseIds: ReadonlySet<string>,
   topicCourse: ReadonlyMap<string, string>,
+  taskPlaces: ReadonlyMap<string, TaskPlace> = new Map(),
   now: Date = new Date(),
 ): SortedUpserts {
   const latest = new Map<string, FocusSessionUpsert>();
@@ -43,10 +54,25 @@ export function sortUpserts(
 
   const rows: FocusSessionRow[] = [];
   const topicDropped: string[] = [];
+  const taskDropped: string[] = [];
   const rejected: SortedUpserts['rejected'] = [];
 
-  for (const upsert of latest.values()) {
-    if (!courseIds.has(upsert.courseId)) {
+  for (const sent of latest.values()) {
+    let upsert = sent;
+    if (sent.taskId !== null) {
+      const place = taskPlaces.get(sent.taskId);
+      if (place) {
+        upsert = { ...sent, courseId: place.courseId, topicId: place.topicId };
+      } else {
+        upsert = { ...sent, taskId: null };
+        taskDropped.push(sent.clientId);
+      }
+    }
+
+    // Placed by its task: topic and course come from the database, nothing to check.
+    const placed = upsert.taskId !== null;
+
+    if (!placed && !courseIds.has(upsert.courseId)) {
       rejected.push({ clientId: upsert.clientId, reason: 'course_missing' });
       continue;
     }
@@ -58,7 +84,7 @@ export function sortUpserts(
     }
 
     let topicId = upsert.topicId;
-    if (topicId !== null && topicCourse.get(topicId) !== upsert.courseId) {
+    if (!placed && topicId !== null && topicCourse.get(topicId) !== upsert.courseId) {
       topicId = null;
       topicDropped.push(upsert.clientId);
     }
@@ -68,6 +94,7 @@ export function sortUpserts(
       client_id: upsert.clientId,
       course_id: upsert.courseId,
       topic_id: topicId,
+      task_id: upsert.taskId,
       kind: upsert.kind,
       started_at: new Date(started).toISOString(),
       ended_at: new Date(ended).toISOString(),
@@ -75,7 +102,7 @@ export function sortUpserts(
     });
   }
 
-  return { rows, topicDropped, rejected };
+  return { rows, topicDropped, taskDropped, rejected };
 }
 
 /** SHA-256 of the pairing token, as `issue_focus_timer_link` stores it. */

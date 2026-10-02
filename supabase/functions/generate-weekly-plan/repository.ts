@@ -157,7 +157,17 @@ export class WeeklyPlanRepository {
 
   /** Everything the planner scores on, in scoped reads. */
   async loadContext(weekStart: IsoDate, weekEnd: IsoDate): Promise<PlanContext> {
-    const [topicsResult, examsResult, linksResult, tasksResult, classResult, sessionsResult, profileResult, coursesResult] =
+    const [
+      topicsResult,
+      examsResult,
+      linksResult,
+      tasksResult,
+      classResult,
+      sessionsResult,
+      timerResult,
+      profileResult,
+      coursesResult,
+    ] =
       await Promise.all([
         this.service
           .from('topics')
@@ -184,6 +194,13 @@ export class WeeklyPlanRepository {
           .eq('user_id', this.userId)
           .gte('started_at', `${addDays(weekStart, -LOOKBACK_WEEKS * 7)}T00:00:00Z`)
           .not('minutes', 'is', null),
+        // Focus Timer stretches filed under a task are measured work on it, like the stopwatch's.
+        this.service
+          .from('focus_sessions')
+          .select('task_id, started_at, minutes')
+          .eq('user_id', this.userId)
+          .gte('started_at', `${addDays(weekStart, -LOOKBACK_WEEKS * 7)}T00:00:00Z`)
+          .not('task_id', 'is', null),
         this.service
           .from('profiles')
           .select('blocked_weekdays, capacity_overrides, timezone')
@@ -198,6 +215,7 @@ export class WeeklyPlanRepository {
     if (tasksResult.error) throw dbError('load tasks', tasksResult.error);
     if (classResult.error) throw dbError('load class schedule', classResult.error);
     if (sessionsResult.error) throw dbError('load study sessions', sessionsResult.error);
+    if (timerResult.error) throw dbError('load focus timer sessions', timerResult.error);
     if (profileResult.error) throw dbError('load profile', profileResult.error);
     if (coursesResult.error) throw dbError('load courses', coursesResult.error);
 
@@ -277,8 +295,8 @@ export class WeeklyPlanRepository {
             ]
           : [],
       ),
-      timed: (sessionsResult.data ?? []).flatMap((session) =>
-        session.minutes === null
+      timed: [...(sessionsResult.data ?? []), ...(timerResult.data ?? [])].flatMap((session) =>
+        session.minutes === null || session.task_id === null
           ? []
           : [{ taskId: session.task_id, startedOn: localDateIn(session.started_at, timeZone), minutes: session.minutes }],
       ),

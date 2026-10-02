@@ -2,10 +2,10 @@ import { BaseRepository } from '@shared/api/repository';
 import type { StudyEntry } from '../domain/study-time';
 
 const TASK_SESSION_SELECT =
-  'id, started_at, minutes, task:tasks!task_sessions_task_fk!inner(topic_id, topic:topics!tasks_topic_fk!inner(id, title, course_id, course:courses!topics_course_fk!inner(id, name, code)))';
+  'id, task_id, started_at, minutes, task:tasks!task_sessions_task_fk!inner(topic_id, topic:topics!tasks_topic_fk!inner(id, title, course_id, course:courses!topics_course_fk!inner(id, name, code)))';
 
 const FOCUS_SESSION_SELECT =
-  'id, started_at, minutes, course_id, topic_id, topic:topics!focus_sessions_topic_fk(id, title), course:courses!focus_sessions_course_fk!inner(id, name, code)';
+  'id, started_at, minutes, course_id, topic_id, task_id, topic:topics!focus_sessions_topic_fk(id, title), course:courses!focus_sessions_course_fk!inner(id, name, code)';
 
 type Scope = { from: string } | { courseId: string } | { topicId: string };
 
@@ -46,6 +46,7 @@ export class StudyTimeRepository extends BaseRepository {
           courseLabel: labelOf(topic.course),
           topicId: topic.id,
           topicTitle: topic.title,
+          taskId: row.task_id,
         },
       ];
     });
@@ -70,6 +71,7 @@ export class StudyTimeRepository extends BaseRepository {
               courseLabel: labelOf(row.course),
               topicId: row.topic?.id ?? null,
               topicTitle: row.topic?.title ?? null,
+              taskId: row.task_id,
             },
           ]
         : [],

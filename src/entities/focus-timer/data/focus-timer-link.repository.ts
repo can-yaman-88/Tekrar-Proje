@@ -16,7 +16,7 @@ export interface IssuedLink {
  * The pairing with the Focus Timer app. The token is issued by the database
  * and shown to nobody: it goes from here straight into the timer's intent.
  */
-class FocusTimerLinkApi extends BaseRepository {
+class FocusTimerLinkRepository extends BaseRepository {
   async status(): Promise<FocusTimerLinkStatus | null> {
     const rows = await this.execute('focus_timer.status', this.db.rpc('focus_timer_link_status'));
     const row = rows[0];
@@ -41,4 +41,4 @@ class FocusTimerLinkApi extends BaseRepository {
   }
 }
 
-export const focusTimerLinkApi = new FocusTimerLinkApi();
+export const focusTimerLinkRepository = new FocusTimerLinkRepository();
