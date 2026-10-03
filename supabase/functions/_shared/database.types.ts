@@ -857,10 +857,33 @@ export type Database = {
           },
         ]
       }
+      focus_timer_claim_attempts: {
+        Row: {
+          created_at: string
+          id: number
+          source_hash: string
+          succeeded: boolean
+        }
+        Insert: {
+          created_at?: string
+          id?: never
+          source_hash: string
+          succeeded: boolean
+        }
+        Update: {
+          created_at?: string
+          id?: never
+          source_hash?: string
+          succeeded?: boolean
+        }
+        Relationships: []
+      }
       focus_timer_links: {
         Row: {
           created_at: string
+          device_id: string | null
           id: string
+          label: string | null
           last_used_at: string | null
           revoked_at: string | null
           token_hash: string
@@ -868,7 +891,9 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          device_id?: string | null
           id?: string
+          label?: string | null
           last_used_at?: string | null
           revoked_at?: string | null
           token_hash: string
@@ -876,7 +901,9 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          device_id?: string | null
           id?: string
+          label?: string | null
           last_used_at?: string | null
           revoked_at?: string | null
           token_hash?: string
@@ -885,6 +912,41 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "focus_timer_links_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      focus_timer_pairing_codes: {
+        Row: {
+          code_hash: string
+          created_at: string
+          expires_at: string
+          id: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          code_hash: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          code_hash?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "focus_timer_pairing_codes_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -1692,6 +1754,15 @@ export type Database = {
         Args: { p_completions: Json; p_daily_log_id: string; p_user_id: string }
         Returns: number
       }
+      claim_focus_timer_code: {
+        Args: {
+          p_code: string
+          p_device_id: string
+          p_label?: string
+          p_source: string
+        }
+        Returns: Json
+      }
       clear_llm_api_key: { Args: never; Returns: undefined }
       complete_mixed_set: {
         Args: { p_on?: string; p_results: Json; p_task_id: string }
@@ -1730,6 +1801,15 @@ export type Database = {
         Args: { p_kind: string; p_location: string; p_source: string }
         Returns: string
       }
+      focus_timer_devices: {
+        Args: never
+        Returns: {
+          id: string
+          label: string
+          last_used_at: string
+          linked_at: string
+        }[]
+      }
       focus_timer_link_status: {
         Args: never
         Returns: {
@@ -1754,6 +1834,7 @@ export type Database = {
       is_app_admin: { Args: never; Returns: boolean }
       is_valid_capacity_overrides: { Args: { p_value: Json }; Returns: boolean }
       is_valid_timezone: { Args: { p_name: string }; Returns: boolean }
+      issue_focus_timer_code: { Args: never; Returns: Json }
       issue_focus_timer_link: { Args: never; Returns: Json }
       kick_off_weekly_plans: { Args: never; Returns: number }
       llm_key_secret_name: { Args: { p_user_id: string }; Returns: string }

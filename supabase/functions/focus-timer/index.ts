@@ -1,27 +1,33 @@
 // POST /functions/v1/focus-timer — called by the Focus Timer Android app.
 //   { action: "subjects" }                     → courses and their topics, to pick from
 //   { action: "sync", upserts, deletes }       → focus stretches recorded on the phone
+//   { action: "claim", code, device }          → a pairing code from Settings, for a token
 //
 // The timer holds no Supabase session. It authenticates with the pairing token
 // Tekrar handed it (header `x-timer-token`), so this function runs with
 // verify_jwt = false and does its own check: the token's hash must belong to a
 // pairing that has not been revoked. Everything after that is scoped to the
-// pairing's user, with the service role.
+// pairing's user, with the service role. Only `claim` comes without a token:
+// the code is the credential there, and claim_focus_timer_code caps the tries.
 import {
   FocusTimerRequestSchema,
+  type FocusTimerClaimResponse,
   type FocusTimerSubjectsResponse,
   type FocusTimerSyncResponse,
+  type TimerDevice,
 } from '../_shared/contracts/focus-timer.contract.ts';
 import { getEnv } from '../_shared/env.ts';
 import { HttpError } from '../_shared/errors.ts';
 import { createHandler, jsonResponse, readJson } from '../_shared/http.ts';
 import { enforceRateLimit } from '../_shared/rate-limit.ts';
 import { createServiceClient, type TypedClient } from '../_shared/supabase.ts';
+import { callerAddress, normalizePairingCode } from './pairing.ts';
 import { addDaysUtc, buildTaskList, sumByTask, TASK_WINDOW } from './subjects.ts';
 import { hashToken, sortUpserts, type TaskPlace } from './sync.ts';
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 const UNLINKED_MESSAGE = 'Bu bağlantı artık geçerli değil. Tekrar → Ayarlar → Focus Timer’dan yeniden bağla.';
+const WRONG_CODE_MESSAGE = 'Kod yanlış ya da süresi dolmuş. Tekrar → Ayarlar → Focus Timer’dan yeni bir kod al.';
 
 interface Link {
   id: string;
@@ -45,22 +51,68 @@ async function authenticateLink(req: Request, service: TypedClient): Promise<Lin
 }
 
 /**
- * Marks the pairing as alive and retires any older one: the first request
- * with a new token is what makes a re-pairing final.
+ * Marks the pairing as alive, notes which device holds it, and retires that
+ * device's older pairing: the first request with a new token is what makes a
+ * re-pairing final. Other devices keep theirs. A timer from before devices
+ * sends none; it replaces the pairings that have none either, as it always did.
  */
-async function touchLink(service: TypedClient, link: Link): Promise<void> {
+async function touchLink(service: TypedClient, link: Link, device: TimerDevice | undefined): Promise<void> {
   const now = new Date().toISOString();
+  const older = service
+    .from('focus_timer_links')
+    .update({ revoked_at: now })
+    .eq('user_id', link.userId)
+    .is('revoked_at', null)
+    .lt('created_at', link.createdAt);
   const [touched, retired] = await Promise.all([
-    service.from('focus_timer_links').update({ last_used_at: now }).eq('id', link.id),
     service
       .from('focus_timer_links')
-      .update({ revoked_at: now })
-      .eq('user_id', link.userId)
-      .is('revoked_at', null)
-      .lt('created_at', link.createdAt),
+      .update({
+        last_used_at: now,
+        ...(device ? { device_id: device.id } : {}),
+        // A name once known is kept when a later request comes without one.
+        ...(device?.name ? { label: device.name } : {}),
+      })
+      .eq('id', link.id),
+    device ? older.eq('device_id', device.id) : older.is('device_id', null),
   ]);
   if (touched.error) throw touched.error;
   if (retired.error) throw retired.error;
+}
+
+/** Trades a pairing code for this device's own token. */
+async function claim(
+  service: TypedClient,
+  req: Request,
+  code: string,
+  device: TimerDevice,
+): Promise<FocusTimerClaimResponse> {
+  const normalized = normalizePairingCode(code);
+  if (!normalized) throw new HttpError('unauthorized', WRONG_CODE_MESSAGE);
+
+  const { data, error } = await service.rpc('claim_focus_timer_code', {
+    p_code: normalized,
+    p_source: await hashToken(callerAddress(req.headers)),
+    p_device_id: device.id,
+    p_label: device.name ?? undefined,
+  });
+  if (error) throw error;
+
+  const result = data as { status?: string; token?: string; account?: string | null } | null;
+  switch (result?.status) {
+    case 'linked':
+      if (typeof result.token !== 'string') throw new HttpError('internal', 'Pairing returned no token.');
+      return { token: result.token, account: result.account ?? null };
+    case 'rate_limited':
+      throw new HttpError('rate_limited', 'Çok fazla deneme oldu. Birkaç dakika sonra yeniden dene.');
+    case 'full':
+      throw new HttpError(
+        'conflict',
+        'Bu hesaba en fazla 5 cihaz bağlanabilir. Tekrar → Ayarlar → Focus Timer’dan birini kaldır.',
+      );
+    default:
+      throw new HttpError('unauthorized', WRONG_CODE_MESSAGE);
+  }
 }
 
 async function loadSubjects(service: TypedClient, userId: string): Promise<FocusTimerSubjectsResponse> {
@@ -213,11 +265,17 @@ async function sync(
 Deno.serve(
   createHandler('focus-timer', async (req, { log, identify }) => {
     const service = createServiceClient(getEnv());
+    const body = FocusTimerRequestSchema.parse(await readJson(req));
+    if (body.action === 'claim') {
+      const claimed = await claim(service, req, body.code, body.device);
+      log.info('focus_claim', { named: body.device.name !== null });
+      return jsonResponse(claimed);
+    }
+
     const link = await authenticateLink(req, service);
     identify(link.userId);
-    const body = FocusTimerRequestSchema.parse(await readJson(req));
     await enforceRateLimit(service, link.userId, 'focus_timer');
-    await touchLink(service, link);
+    await touchLink(service, link, body.device);
 
     if (body.action === 'subjects') return jsonResponse(await loadSubjects(service, link.userId));
 

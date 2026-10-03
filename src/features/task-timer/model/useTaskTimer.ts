@@ -1,7 +1,7 @@
 import {
   focusTimerSupported,
   openTaskInFocusTimer,
-  useFocusTimerLinkStatus,
+  useFocusTimerDevices,
   type TimerTaskTarget,
 } from '@entities/focus-timer';
 import { courseLabel } from '@entities/course';
@@ -64,7 +64,7 @@ export function useTaskTimer(task: Task | null) {
   const taskIds = useMemo(() => (task ? [task.id, ...steps.map((step) => step.id)] : []), [steps, task]);
   const sessionsQuery = useTaskSessions(taskIds);
   const runningQuery = useRunningSession();
-  const linkStatus = useFocusTimerLinkStatus();
+  const timerDevices = useFocusTimerDevices({ enabled: focusTimerSupported });
   const start = useStartSession();
   const stop = useStopSession();
   const logManual = useLogManualSession();
@@ -127,7 +127,7 @@ export function useTaskTimer(task: Task | null) {
       courseLabel: courseLabel(task.course),
     };
   }, [isGroup, isOpen, steps, task]);
-  const canUseFocusTimer = focusTimerSupported && linkStatus.data != null && timerTarget !== null;
+  const canUseFocusTimer = focusTimerSupported && (timerDevices.data?.length ?? 0) > 0 && timerTarget !== null;
 
   const onStart = useCallback(() => {
     start.mutate(

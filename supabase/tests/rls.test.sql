@@ -5,7 +5,7 @@
 -- write another's data, anonymous callers get nothing, and the privileged RPCs
 -- are unreachable from the app's role.
 begin;
-select plan(169);
+select plan(186);
 
 create extension if not exists pgtap with schema extensions;
 
@@ -1370,7 +1370,69 @@ select ok(
 select is((select count(*)::int from public.focus_timer_link_status()), 1, 'B now has a timer');
 select lives_ok('select public.revoke_focus_timer_link()', 'B can disconnect the timer');
 select is((select count(*)::int from public.focus_timer_link_status()), 0, 'a disconnected timer is gone');
+select throws_ok('select count(*) from public.focus_timer_pairing_codes', '42501', null, 'pairing codes never reach the app');
+select throws_ok(
+  $$select public.claim_focus_timer_code('ABCDEFGH', 'x', 'dddddddd-0000-4000-8000-000000000001')$$,
+  '42501',
+  null,
+  'the app cannot claim a code (only the focus-timer function can)'
+);
+select ok(
+  (select (public.issue_focus_timer_code() ->> 'code') ~ '^[0-9A-HJKMNP-TV-Z]{8}$'),
+  'a pairing code is eight characters with no look-alikes'
+);
 reset role;
+
+set local role anon;
+select throws_ok('select public.issue_focus_timer_code()', '42501', null, 'anon cannot ask for a pairing code');
+select throws_ok('select count(*) from public.focus_timer_devices()', '42501', null, 'anon cannot list devices');
+reset role;
+
+-- A code becomes one device's pairing, once; two devices hold two pairings.
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+create temp table focus_code on commit drop as select public.issue_focus_timer_code() ->> 'code' as code;
+reset role;
+select is(
+  public.claim_focus_timer_code((select code from focus_code), 'src', 'dddddddd-0000-4000-8000-000000000001', 'Tablet') ->> 'status',
+  'linked',
+  'a fresh code links a device'
+);
+select is(
+  public.claim_focus_timer_code((select code from focus_code), 'src', 'dddddddd-0000-4000-8000-000000000002', 'Phone') ->> 'status',
+  'invalid',
+  'a code links only once'
+);
+select is(
+  public.claim_focus_timer_code('ZZZZZZZZ', 'src', 'dddddddd-0000-4000-8000-000000000002', 'Phone') ->> 'status',
+  'invalid',
+  'a made-up code links nothing'
+);
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002","role":"authenticated"}';
+select lives_ok('select public.issue_focus_timer_link()', 'pairing this phone leaves the tablet connected');
+select is((select count(*)::int from public.focus_timer_devices()), 2, 'B now lists two devices');
+select is(
+  (select label from public.focus_timer_devices() where label is not null),
+  'Tablet',
+  'a device is listed under its own name'
+);
+select lives_ok('select public.issue_focus_timer_link()', 'a third device');
+select lives_ok('select public.issue_focus_timer_link()', 'a fourth device');
+select lives_ok('select public.issue_focus_timer_link()', 'a fifth device');
+select throws_ok('select public.issue_focus_timer_link()', '23514', null, 'a sixth device is refused');
+create temp table focus_code_full on commit drop as select public.issue_focus_timer_code() ->> 'code' as code;
+reset role;
+select is(
+  public.claim_focus_timer_code((select code from focus_code_full), 'src', 'dddddddd-0000-4000-8000-000000000003', 'Sixth') ->> 'status',
+  'full',
+  'a code cannot add a sixth device either'
+);
+select is(
+  public.claim_focus_timer_code((select code from focus_code_full), 'src', 'dddddddd-0000-4000-8000-000000000001', 'Tablet') ->> 'status',
+  'linked',
+  'but a connected device can still pair again'
+);
 
 -- A stretch on a task: the task must be the student's own and match the topic.
 select lives_ok(

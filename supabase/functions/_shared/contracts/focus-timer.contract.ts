@@ -1,8 +1,28 @@
 // POST /functions/v1/focus-timer — spoken by the Focus Timer Android app, not by Tekrar.
 //
 // The caller is identified by the pairing token in `x-timer-token`, never by a
-// Supabase session: the timer holds no account credentials.
+// Supabase session: the timer holds no account credentials. The one exception
+// is `claim`, which trades a pairing code from Tekrar's Settings for a token.
 import { z } from 'zod';
+
+/**
+ * Which install of the timer is calling. A device that pairs again replaces
+ * only its own older pairing, so the student can keep the timer on several
+ * devices. The name is what Settings lists.
+ */
+export const TimerDeviceSchema = z.object({
+  id: z.uuid(),
+  name: z
+    .string()
+    .max(200)
+    .nullable()
+    .default(null)
+    .transform((name) => name?.trim().slice(0, 60) || null),
+});
+export type TimerDevice = z.infer<typeof TimerDeviceSchema>;
+
+/** Timers from before devices send none. */
+const OptionalDevice = TimerDeviceSchema.optional();
 
 /** One focus stretch as the timer recorded it. */
 export const FocusSessionUpsertSchema = z.object({
@@ -25,13 +45,16 @@ export type FocusSessionUpsert = z.infer<typeof FocusSessionUpsertSchema>;
 
 export const FocusTimerRequestSchema = z.discriminatedUnion('action', [
   /** The courses and topics to choose from. */
-  z.object({ action: z.literal('subjects') }),
+  z.object({ action: z.literal('subjects'), device: OptionalDevice }),
   /** New or edited stretches, and the ids of stretches deleted on the phone. */
   z.object({
     action: z.literal('sync'),
     upserts: z.array(FocusSessionUpsertSchema).max(200).default([]),
     deletes: z.array(z.uuid()).max(200).default([]),
+    device: OptionalDevice,
   }),
+  /** A pairing code typed into the timer; answered with the device's own token. No `x-timer-token`. */
+  z.object({ action: z.literal('claim'), code: z.string().max(32), device: TimerDeviceSchema }),
 ]);
 export type FocusTimerRequest = z.infer<typeof FocusTimerRequestSchema>;
 
@@ -74,4 +97,11 @@ export interface FocusTimerSyncResponse {
   taskDropped: string[];
   rejected: { clientId: string; reason: FocusSessionRejection }[];
   deleted: string[];
+}
+
+export interface FocusTimerClaimResponse {
+  /** This device's pairing token, sent as `x-timer-token` from now on. */
+  token: string;
+  /** The account the device is now paired with, to show on the timer. */
+  account: string | null;
 }

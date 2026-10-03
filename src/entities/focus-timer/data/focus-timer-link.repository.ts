@@ -1,7 +1,11 @@
 import { BaseRepository } from '@shared/api/repository';
 import { AppError } from '@shared/lib/errors';
 
-export interface FocusTimerLinkStatus {
+/** One device the Focus Timer is paired on. */
+export interface FocusTimerDevice {
+  id: string;
+  /** The device's own name, as its timer reported it; null until a timer that sends one reports. */
+  label: string | null;
   linkedAt: string;
   /** When the timer last reached the server; null until its first request. */
   lastUsedAt: string | null;
@@ -12,15 +16,26 @@ export interface IssuedLink {
   token: string;
 }
 
+/** Eight characters to type into the timer on another device. */
+export interface PairingCode {
+  code: string;
+  expiresAt: string;
+}
+
 /**
- * The pairing with the Focus Timer app. The token is issued by the database
- * and shown to nobody: it goes from here straight into the timer's intent.
+ * The pairings with the Focus Timer app, one per device. A token is issued by
+ * the database and shown to nobody: it goes from here straight into the
+ * timer's intent. A pairing code is the way in for a device without Tekrar.
  */
 class FocusTimerLinkRepository extends BaseRepository {
-  async status(): Promise<FocusTimerLinkStatus | null> {
-    const rows = await this.execute('focus_timer.status', this.db.rpc('focus_timer_link_status'));
-    const row = rows[0];
-    return row ? { linkedAt: row.linked_at, lastUsedAt: row.last_used_at ?? null } : null;
+  async devices(): Promise<FocusTimerDevice[]> {
+    const rows = await this.execute('focus_timer.devices', this.db.rpc('focus_timer_devices'));
+    return rows.map((row) => ({
+      id: row.id,
+      label: row.label ?? null,
+      linkedAt: row.linked_at,
+      lastUsedAt: row.last_used_at ?? null,
+    }));
   }
 
   async issue(): Promise<IssuedLink> {
@@ -32,7 +47,16 @@ class FocusTimerLinkRepository extends BaseRepository {
     return { id: value.id, token: value.token };
   }
 
-  /** With an id, withdraws that one pairing; without, disconnects the timer. */
+  async issueCode(): Promise<PairingCode> {
+    const result = await this.execute('focus_timer.issue_code', this.db.rpc('issue_focus_timer_code'));
+    const value = result as { code?: unknown; expiresAt?: unknown } | null;
+    if (typeof value?.code !== 'string' || typeof value.expiresAt !== 'string') {
+      throw new AppError('server', 'Bağlantı kodu oluşturulamadı.');
+    }
+    return { code: value.code, expiresAt: value.expiresAt };
+  }
+
+  /** With an id, removes that one device's pairing; without, disconnects every device. */
   async revoke(linkId?: string): Promise<void> {
     await this.execute(
       'focus_timer.revoke',

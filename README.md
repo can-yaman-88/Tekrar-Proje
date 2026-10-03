@@ -52,7 +52,7 @@ npx tsc --noEmit        # tip kontrolü
 npx expo lint           # katman sınırları dahil
 npx jest                # alan (domain) ve altyapı testleri (ayar: jest.config.js)
 npx expo-doctor         # bağımlılık uyumu
-npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 154 test)
+npx supabase test db    # RLS ve veri bütünlüğü testleri (pgTAP, 186 test)
 ```
 
 Edge Function testleri (Deno kurulu değilse Docker ile):
@@ -286,7 +286,7 @@ başlatırsan öncekini kapatır.
 - **Tahmin–gerçek karşılaştırmasına.** Görev kartı "Tahmin 25 dk, gerçek 38 dk" der; haftalık
   özet aynı karşılaştırmayı görev türü bazında gösterir.
 
-## Focus Timer bağlantısı (Android)
+## Focus Timer bağlantısı (Android, birden fazla cihaz)
 
 Ayrı bir Android uygulaması olan Focus Timer'da (`com.deepwork.focustimer`) başlamadan önce
 ders ve istersen konu seçilir. Her odak süresi Tekrar'a gelir:
@@ -314,13 +314,29 @@ ilerleme (açık görevde "kaldı/aştı", bitmişte "tahmin tuttu mu"), oturum 
 silinebilir), çalışan sayaç için "Bitir ve kaydet" / "Vazgeç", hızlı ya da istenen dakikada elle
 ekleme; grup görevde adım adım süre.
 
-**Bağlama:** Ayarlar → Focus Timer → "Focus Timer'ı bağla". Veritabanı rastgele bir anahtar
-üretir (yalnızca SHA-256'sı saklanır), Tekrar onu açık (explicit) bir intent'le doğrudan Focus
-Timer'ın onay ekranına verir; Focus Timer da yalnızca `com.tekrar.app` paketinden gelen isteği
-kabul eder. Anahtar yalnızca `focus-timer` Edge Function'ını çağırabilir: ders–konu adlarını
-okur, çalışma süresi yazar. Bu fonksiyon Supabase oturumu beklemez (`verify_jwt = false`),
-`x-timer-token` başlığındaki anahtarı kendisi doğrular. Yeniden bağlamak, yeni anahtar ilk kez
-kullanıldığında eskisini geçersiz kılar; "Bağlantıyı kaldır" hepsini hemen keser.
+**Bağlama:** Focus Timer en fazla 5 cihazda birden bağlı olabilir; Ayarlar → Focus Timer
+cihazları son eşitleme zamanıyla listeler, her birinin kendi "Kaldır"ı vardır. İki yol var:
+
+- **Bu telefonda** (Android): "Bu telefondaki Focus Timer'ı bağla". Veritabanı rastgele bir
+  anahtar üretir (yalnızca SHA-256'sı saklanır), Tekrar onu açık (explicit) bir intent'le
+  doğrudan Focus Timer'ın onay ekranına verir; Focus Timer da yalnızca `com.tekrar.app`
+  paketinden gelen isteği kabul eder.
+- **Başka bir cihazda** (orada Tekrar kurulu olmak zorunda değil): "Başka bir cihaz için kod
+  al" 8 karakterlik bir kod gösterir (Crockford base32, 10 dakika, tek kullanım, yalnızca
+  hash'i saklanır). Timer'da DATA → TEKRAR → CONNECT WITH CODE'a yazılır; `focus-timer`
+  fonksiyonunun `claim` işlemi kodu o cihaza ait bir anahtarla değiştirir. Tahmin denemeleri
+  çağıran başına (15 dakikada 10) ve toplamda (15 dakikada 100 başarısız) sınırlıdır. Timer
+  kodun gideceği adresi build sırasında `local.properties`'ten (`tekrar.endpoint`,
+  `tekrar.apiKey`) ya da ortam değişkenlerinden okur.
+
+Anahtar yalnızca `focus-timer` Edge Function'ını çağırabilir: ders–konu adlarını okur, çalışma
+süresi yazar. Bu fonksiyon Supabase oturumu beklemez (`verify_jwt = false`), `x-timer-token`
+başlığındaki anahtarı kendisi doğrular. Timer her istekte kendi kurulum kimliğini ve cihaz adını
+gönderir: bir cihazı yeniden bağlamak, yeni anahtar ilk kez kullanıldığında yalnızca **o
+cihazın** eski anahtarını geçersiz kılar, diğer cihazlar çalışmaya devam eder. Kimlik
+göndermeyen eski timer sürümleri eskisi gibi davranır (yalnızca kimliksiz eski bağlantıların
+yerine geçer). Her cihazın süreleri ayrı gelir ve Tekrar'da toplanır; timer'ın kendi
+istatistikleri ise cihaz başınadır.
 
 Focus Timer çevrimdışı çalışmaya devam eder: süreler önce telefona yazılır, internet olunca
 toplu gönderilir. Her sürenin telefondaki kimliği (`client_id`) olduğu için tekrar gönderim
@@ -672,7 +688,7 @@ OpenRouter etkinlik kaydında da görünmez.
 
 ## Güvenlik
 
-- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 154 pgTAP testi
+- Her tablo RLS ile korunur; her kullanıcı yalnızca kendi satırlarını görür. 186 pgTAP testi
   bunu kanıtlar (`supabase/tests/rls.test.sql`). Tekrar geçmişi uygulama için salt okunurdur:
   satırları yalnızca takvimi değiştiren veritabanı fonksiyonları yazar.
 - **Görev durumu tek kapıdan değişir.** `guard_task_status` tetikleyicisi, uygulamanın
